@@ -9,6 +9,19 @@ const CORE_BASE = "/ffmpeg-core";
 let ffmpegInstance = null;
 let loadPromise = null;
 
+// There is exactly one shared ffmpeg.wasm worker for the whole app, so with
+// multiple videos and multiple tracks per video in flight, calls to probe/extract
+// must run one at a time rather than racing each other on the same worker.
+let engineQueue = Promise.resolve();
+function runExclusive(task) {
+  const result = engineQueue.then(task, task);
+  engineQueue = result.then(
+    () => undefined,
+    () => undefined
+  );
+  return result;
+}
+
 /** Lazily create + load the single shared ffmpeg instance. */
 export function loadEngine(onLog) {
   if (loadPromise) return loadPromise;
@@ -44,6 +57,11 @@ const SUBTITLE_TEXT_CODECS = new Set([
   "text",
 ]);
 
+/** Extension we'll produce for a subtitle stream, without actually running ffmpeg. */
+export function guessSubtitleExtension(codec) {
+  return SUBTITLE_TEXT_CODECS.has(codec) ? "srt" : "ass";
+}
+
 /** Parse ffprobe/ffmpeg -i stderr output into stream + duration info. */
 function parseProbeLog(log) {
   const streams = [];
@@ -72,26 +90,28 @@ function parseProbeLog(log) {
 }
 
 /** Run `ffmpeg -i` (which always "fails" with no output) purely to read its stream report. */
-export async function probeFile(file, onLog) {
-  const ffmpeg = await loadEngine();
-  const inputName = safeName(file.name);
-  await ffmpeg.writeFile(inputName, await fetchFile(file));
+export function probeFile(file) {
+  return runExclusive(async () => {
+    const ffmpeg = await loadEngine();
+    const inputName = safeName(file.name);
+    await ffmpeg.writeFile(inputName, await fetchFile(file));
 
-  let log = "";
-  const collector = ({ message }) => {
-    log += message + "\n";
-  };
-  ffmpeg.on("log", collector);
-  try {
-    await ffmpeg.exec(["-i", inputName]);
-  } catch {
-    // expected: ffmpeg exits non-zero when no output is requested
-  } finally {
-    ffmpeg.off("log", collector);
-  }
+    let log = "";
+    const collector = ({ message }) => {
+      log += message + "\n";
+    };
+    ffmpeg.on("log", collector);
+    try {
+      await ffmpeg.exec(["-i", inputName]);
+    } catch {
+      // expected: ffmpeg exits non-zero when no output is requested
+    } finally {
+      ffmpeg.off("log", collector);
+    }
 
-  const info = parseProbeLog(log);
-  return { inputName, ...info };
+    const info = parseProbeLog(log);
+    return { inputName, ...info };
+  });
 }
 
 function safeName(name) {
@@ -106,50 +126,64 @@ const AUDIO_ENCODERS = {
   aac: ["-c:a", "aac", "-b:a", "192k"],
 };
 
-/** Extract the audio track to the requested format. Returns a Blob. */
-export async function extractAudio({ inputName, format, onProgress }) {
-  const ffmpeg = await loadEngine();
-  const outputName = `out.${format}`;
-  const encoderArgs = AUDIO_ENCODERS[format] || AUDIO_ENCODERS.mp3;
+/** Extract a single audio stream (by absolute ffmpeg stream index) to the requested format. */
+export function extractAudio({ inputName, streamIndex, format, onProgress }) {
+  return runExclusive(async () => {
+    const ffmpeg = await loadEngine();
+    const outputName = `out_${streamIndex}.${format}`;
+    const encoderArgs = AUDIO_ENCODERS[format] || AUDIO_ENCODERS.mp3;
+    const mapArgs = Number.isFinite(streamIndex) ? ["-map", `0:${streamIndex}`] : [];
 
-  const progressHandler = ({ progress }) => {
-    if (onProgress && Number.isFinite(progress)) onProgress(Math.min(progress, 1));
-  };
-  ffmpeg.on("progress", progressHandler);
-  try {
-    await ffmpeg.exec(["-i", inputName, "-vn", ...encoderArgs, outputName]);
-  } finally {
-    ffmpeg.off("progress", progressHandler);
-  }
+    const progressHandler = ({ progress }) => {
+      if (onProgress && Number.isFinite(progress)) onProgress(Math.min(Math.max(progress, 0), 1));
+    };
+    ffmpeg.on("progress", progressHandler);
+    try {
+      await ffmpeg.exec(["-i", inputName, ...mapArgs, "-vn", ...encoderArgs, outputName]);
+    } finally {
+      ffmpeg.off("progress", progressHandler);
+    }
 
-  const data = await ffmpeg.readFile(outputName);
-  await ffmpeg.deleteFile(outputName);
-  return new Blob([data.buffer], { type: `audio/${format}` });
+    const data = await ffmpeg.readFile(outputName);
+    await ffmpeg.deleteFile(outputName);
+    return new Blob([data.buffer], { type: `audio/${format}` });
+  });
 }
 
 /** Extract a subtitle stream. Tries to convert to .srt; falls back to its native container. */
-export async function extractSubtitle({ inputName, streamIndex, codec }) {
-  const ffmpeg = await loadEngine();
-  const isText = SUBTITLE_TEXT_CODECS.has(codec);
+export function extractSubtitle({ inputName, streamIndex, codec, onProgress }) {
+  return runExclusive(async () => {
+    const ffmpeg = await loadEngine();
+    const isText = SUBTITLE_TEXT_CODECS.has(codec);
 
-  if (isText) {
-    const outputName = "subs.srt";
+    const progressHandler = ({ progress }) => {
+      if (onProgress && Number.isFinite(progress)) onProgress(Math.min(Math.max(progress, 0), 1));
+    };
+    ffmpeg.on("progress", progressHandler);
+
     try {
-      await ffmpeg.exec(["-i", inputName, "-map", `0:${streamIndex}`, "-c:s", "srt", outputName]);
+      if (isText) {
+        const outputName = `subs_${streamIndex}.srt`;
+        try {
+          await ffmpeg.exec(["-i", inputName, "-map", `0:${streamIndex}`, "-c:s", "srt", outputName]);
+          const data = await ffmpeg.readFile(outputName);
+          await ffmpeg.deleteFile(outputName);
+          return { blob: new Blob([data.buffer], { type: "text/srt" }), extension: "srt" };
+        } catch {
+          // fall through to raw copy below
+        }
+      }
+
+      // Bitmap or otherwise inconvertible subtitle: copy the stream as-is.
+      const outputName = `subs_${streamIndex}.ass`;
+      await ffmpeg.exec(["-i", inputName, "-map", `0:${streamIndex}`, "-c:s", "copy", outputName]);
       const data = await ffmpeg.readFile(outputName);
       await ffmpeg.deleteFile(outputName);
-      return { blob: new Blob([data.buffer], { type: "text/srt" }), extension: "srt" };
-    } catch {
-      // fall through to raw copy below
+      return { blob: new Blob([data.buffer]), extension: "ass" };
+    } finally {
+      ffmpeg.off("progress", progressHandler);
     }
-  }
-
-  // Bitmap or otherwise inconvertible subtitle: copy the stream as-is.
-  const outputName = "subs.ass";
-  await ffmpeg.exec(["-i", inputName, "-map", `0:${streamIndex}`, "-c:s", "copy", outputName]);
-  const data = await ffmpeg.readFile(outputName);
-  await ffmpeg.deleteFile(outputName);
-  return { blob: new Blob([data.buffer]), extension: "ass" };
+  });
 }
 
 export async function cleanupInput(inputName) {

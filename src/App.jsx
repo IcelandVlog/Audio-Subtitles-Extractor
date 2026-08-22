@@ -1,7 +1,7 @@
 import { useTrackQueue } from "./lib/useTrackQueue";
 import Meter from "./components/Meter";
 import Dropzone from "./components/Dropzone";
-import TrackRow from "./components/TrackRow";
+import TrackCard from "./components/TrackCard";
 import "./App.css";
 
 export default function App() {
@@ -11,12 +11,21 @@ export default function App() {
     engineError,
     addFiles,
     setAudioFormat,
-    toggleSubtitles,
     removeTrack,
-    runExtraction,
+    extractOneAudio,
+    extractOneSubtitle,
+    extractAllAudio,
+    extractAllSubtitles,
   } = useTrackQueue();
 
-  const anyBusy = tracks.some((t) => t.status === "extracting" || t.status === "probing");
+  const anyBusy = tracks.some(
+    (t) =>
+      t.status === "probing" ||
+      t.audioAllStatus === "extracting" ||
+      t.subsAllStatus === "extracting" ||
+      t.audioStreams.some((s) => s.status === "extracting") ||
+      t.subtitleStreams.some((s) => s.status === "extracting")
+  );
 
   return (
     <>
@@ -45,9 +54,9 @@ export default function App() {
             Pull the words.
           </h1>
           <p className="hero__sub">
-            Drop in a video and Strip lifts a clean audio file and any subtitle tracks straight out of
-            it — mp3, wav, srt, whatever you need. Everything runs in this browser tab, so nothing ever
-            leaves your machine.
+            Drop in one or many videos and Strip lists every audio and subtitle track it finds —
+            pull one out at a time, or grab everything of a kind at once as a zip. Everything runs
+            in this browser tab, so nothing ever leaves your machine.
           </p>
           <Meter active={anyBusy} />
         </section>
@@ -63,13 +72,15 @@ export default function App() {
               <span>{tracks.length} file{tracks.length > 1 ? "s" : ""}</span>
             </div>
             {tracks.map((t, i) => (
-              <TrackRow
+              <TrackCard
                 key={t.id}
                 track={t}
                 index={i}
                 onSetFormat={setAudioFormat}
-                onToggleSubs={toggleSubtitles}
-                onExtract={runExtraction}
+                onExtractOneAudio={extractOneAudio}
+                onExtractOneSubtitle={extractOneSubtitle}
+                onExtractAllAudio={extractAllAudio}
+                onExtractAllSubtitles={extractAllSubtitles}
                 onRemove={removeTrack}
               />
             ))}
