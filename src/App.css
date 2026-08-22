@@ -38,6 +38,34 @@
   color: var(--phosphor);
 }
 
+.nav__right {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.nav__theme {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.nav__theme:hover {
+  color: var(--phosphor);
+  border-color: var(--phosphor-dim);
+  box-shadow: 0 0 8px var(--phosphor-glow);
+}
+
 .shell {
   flex: 1;
   max-width: 860px;

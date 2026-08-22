@@ -1,10 +1,23 @@
+import { useEffect, useState } from "react";
 import { useTrackQueue } from "./lib/useTrackQueue";
 import Meter from "./components/Meter";
 import Dropzone from "./components/Dropzone";
 import TrackCard from "./components/TrackCard";
 import "./App.css";
 
+const THEME_KEY = "strip-theme";
+
 export default function App() {
+  const [theme, setTheme] = useState(() => {
+    if (typeof window === "undefined") return "dark";
+    return localStorage.getItem(THEME_KEY) || "dark";
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem(THEME_KEY, theme);
+  }, [theme]);
+
   const {
     tracks,
     engineState,
@@ -39,14 +52,25 @@ export default function App() {
           <span className="nav__dot" />
           STRIP
         </div>
-        <a
-          className="nav__link"
-          href="https://github.com/Bisalkumar/Audio-Extractor"
-          target="_blank"
-          rel="noreferrer"
-        >
-          source ↗
-        </a>
+        <div className="nav__right">
+          <a
+            className="nav__link"
+            href="https://github.com/Bisalkumar/Audio-Extractor"
+            target="_blank"
+            rel="noreferrer"
+          >
+            source ↗
+          </a>
+          <button
+            type="button"
+            className="nav__theme"
+            onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+            aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            title={theme === "dark" ? "Light mode" : "Dark mode"}
+          >
+            {theme === "dark" ? "☀" : "☾"}
+          </button>
+        </div>
       </header>
 
       <main className="shell">

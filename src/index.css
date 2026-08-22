@@ -17,6 +17,7 @@
   --phosphor: #6fffa6;
   --phosphor-dim: #3d8a5e;
   --phosphor-glow: rgba(111, 255, 166, 0.35);
+  --bg-glow: rgba(111, 255, 166, 0.06);
 
   --amber: #ffb454;
   --amber-dim: #8a6a34;
@@ -31,6 +32,33 @@
   --radius-sm: 3px;
   --radius-md: 6px;
   --radius-lg: 10px;
+}
+
+/* ---- light mode: same console layout, paper-and-ink palette ---- */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #f3f4f0;
+  --bg-grain: #eceee8;
+  --surface: #ffffff;
+  --surface-raised: #f8f9f5;
+  --surface-hover: #eef1ea;
+  --border: #dadedb;
+  --border-soft: #e4e7e1;
+
+  --text: #171a17;
+  --text-muted: #5a625b;
+  --text-faint: #93998f;
+
+  --phosphor: #1f8f57;
+  --phosphor-dim: #2f7a4c;
+  --phosphor-glow: rgba(31, 143, 87, 0.22);
+  --bg-glow: rgba(31, 143, 87, 0.05);
+
+  --amber: #a8631a;
+  --amber-dim: #c98f4a;
+
+  --red: #c8433a;
 }
 
 * {
@@ -49,12 +77,13 @@ h1, h2, h3 {
 
 body {
   background:
-    radial-gradient(ellipse 1200px 600px at 50% -10%, rgba(111, 255, 166, 0.06), transparent),
+    radial-gradient(ellipse 1200px 600px at 50% -10%, var(--bg-glow), transparent),
     var(--bg);
   color: var(--text);
   font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
   min-height: 100vh;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 #root {
