@@ -1,8 +1,10 @@
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile, toBlobURL } from "@ffmpeg/util";
 
-const CORE_VERSION = "0.12.6";
-const CORE_BASE = `https://unpkg.com/@ffmpeg/core@${CORE_VERSION}/dist/umd`;
+// Served from our own /public folder instead of a third-party CDN — no CORS
+// dependency, no external outage/blocking risk, and everything really does
+// stay same-origin as requested.
+const CORE_BASE = "/ffmpeg-core";
 
 let ffmpegInstance = null;
 let loadPromise = null;

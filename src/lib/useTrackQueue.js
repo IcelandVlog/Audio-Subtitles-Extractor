@@ -54,6 +54,7 @@ export function useTrackQueue() {
       // allow the user to retry (e.g. after fixing their connection)
       engineRequested.current = false;
       setEngineState("error");
+      console.error("[engine] load failed:", err);
       setEngineError(
         "Couldn't load the audio engine. Check your internet connection — this app downloads " +
           "an ffmpeg core (~30MB) from a CDN the first time — and try adding the file again."

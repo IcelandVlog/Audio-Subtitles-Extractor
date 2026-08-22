@@ -22,9 +22,10 @@ npm run dev
    needed.
 4. Deploy.
 
-No special headers or config are required: the app uses the single-threaded
-`ffmpeg.wasm` core loaded from a CDN at runtime, so it does not need
-`Cross-Origin-Opener-Policy` / `Cross-Origin-Embedder-Policy` headers.
+No special headers or config are required: the `ffmpeg-core` engine is bundled
+directly in `public/ffmpeg-core/` and served from your own domain — no
+third-party CDN dependency, no CORS, no `Cross-Origin-Opener-Policy` /
+`Cross-Origin-Embedder-Policy` headers needed.
 
 ## How it works
 
@@ -40,6 +41,12 @@ No special headers or config are required: the app uses the single-threaded
 
 ## Notes
 
+- The `ffmpeg-core` engine files (`public/ffmpeg-core/ffmpeg-core.js` and
+  `.wasm`, ~30MB) are the **ESM** build of `@ffmpeg/core`, copied from
+  `node_modules/@ffmpeg/core/dist/esm/`. If you ever bump the `@ffmpeg/ffmpeg`
+  version, re-copy from `dist/esm` (not `dist/umd` — the UMD build fails with
+  "failed to import ffmpeg-core.js" because the library loads it via dynamic
+  ES module `import()`).
 - Large files can be slow and memory-hungry since decoding happens on the
   visitor's CPU in-browser. That's the tradeoff for not needing a server.
 - The original desktop version of this tool (Python + Tkinter,
