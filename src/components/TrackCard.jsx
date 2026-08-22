@@ -16,9 +16,11 @@ export default function TrackCard({
   index,
   onSetFormat,
   onExtractOneAudio,
+  onDownloadOneAudio,
   onExtractOneSubtitle,
   onDownloadOneSubtitle,
   onExtractAllAudio,
+  onDownloadAllAudio,
   onExtractAllSubtitles,
   onDownloadAllSubtitles,
   onRemove,
@@ -143,7 +145,9 @@ export default function TrackCard({
             allStatus={audioAllStatus}
             allProgress={audioAllProgress}
             onExtractOne={(streamIndex) => onExtractOneAudio(id, streamIndex)}
+            onDownloadOne={(streamIndex) => onDownloadOneAudio(id, streamIndex)}
             onExtractAll={() => onExtractAllAudio(id)}
+            onDownloadAll={() => onDownloadAllAudio(id)}
             onSetFormat={(streamIndex, format) => onSetFormat(id, streamIndex, format)}
           />
           <StreamTable

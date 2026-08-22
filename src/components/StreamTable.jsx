@@ -27,7 +27,7 @@ export default function StreamTable({
         {hasStreams &&
           (allRunning ? (
             <span className="stream-table__all-progress">{Math.round(allProgress * 100)}%</span>
-          ) : !isAudio && allStatus === "done" ? (
+          ) : allStatus === "done" ? (
             <button className="stream-table__all-btn" onClick={onDownloadAll}>
               Download all
             </button>
@@ -76,36 +76,15 @@ export default function StreamTable({
               )}
 
               <div className="stream-row__action">
-                {isAudio ? (
-                  s.status === "extracting" ? (
-                    <span className="stream-row__pct">{Math.round(s.progress * 100)}%</span>
-                  ) : s.status === "done" ? (
-                    <button
-                      className="stream-row__link"
-                      onClick={() => onExtractOne(s.index)}
-                      title="Extract again"
-                    >
-                      ✓ done
-                    </button>
-                  ) : (
-                    <button
-                      className="stream-row__link"
-                      disabled={disabled}
-                      onClick={() => onExtractOne(s.index)}
-                    >
-                      Extract
-                    </button>
-                  )
-                ) : s.status === "extracting" ? (
+                {s.status === "extracting" ? (
                   <span className="stream-row__pct">{Math.round(s.progress * 100)}%</span>
                 ) : s.status === "done" ? (
                   <>
-                    <button
-                      className="stream-row__link"
-                      onClick={() => onShowOne(s.index)}
-                    >
-                      Show
-                    </button>
+                    {!isAudio && (
+                      <button className="stream-row__link" onClick={() => onShowOne(s.index)}>
+                        Show
+                      </button>
+                    )}
                     <button className="stream-row__link" onClick={() => onDownloadOne(s.index)}>
                       Download
                     </button>

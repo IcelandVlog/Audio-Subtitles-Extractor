@@ -40,7 +40,7 @@ function makeAudioStream(s) {
     format: "mp3",
     status: "idle", // idle | extracting | done | error
     progress: 0,
-    result: null, // { extension }
+    result: null, // { extension, blob } once extracted — kept for Download
     error: null,
   };
 }
@@ -130,6 +130,7 @@ export function useTrackQueue() {
         subtitleStreams: [],
         audioAllStatus: "idle", // idle | extracting | done | error
         audioAllProgress: 0,
+        audioAllResult: null,
         subsAllStatus: "idle",
         subsAllProgress: 0,
         subsAllResult: null,
@@ -183,7 +184,19 @@ export function useTrackQueue() {
   );
 
   const setAudioFormat = useCallback(
-    (trackId, streamIndex, format) => patchStream(trackId, "audio", streamIndex, { format }),
+    (trackId, streamIndex, format) => {
+      const track = tracksRef.current.find((t) => t.id === trackId);
+      const stream = track?.audioStreams.find((s) => s.index === streamIndex);
+      const patch = { format };
+      // a previous result was for the old format — drop it so Extract runs again
+      if (stream && (stream.status === "done" || stream.status === "error")) {
+        patch.status = "idle";
+        patch.progress = 0;
+        patch.result = null;
+        patch.error = null;
+      }
+      patchStream(trackId, "audio", streamIndex, patch);
+    },
     [patchStream]
   );
 
@@ -196,8 +209,8 @@ export function useTrackQueue() {
   }, []);
 
   // ---- single-stream extraction ----
-  // Audio still downloads immediately once done. Subtitles no longer auto-download:
-  // the blob is kept on the stream's result so Show/Download can use it afterwards.
+  // Neither kind auto-downloads anymore: the blob is kept on the stream's result
+  // so a separate Download click can use it afterwards.
   const extractOneStream = useCallback(
     async (trackId, kind, streamIndex) => {
       const track = tracksRef.current.find((t) => t.id === trackId);
@@ -208,9 +221,6 @@ export function useTrackQueue() {
 
       patchStream(trackId, kind, streamIndex, { status: "extracting", progress: 0, error: null });
       try {
-        const base = stripExt(track.name);
-        const langTag = stream.language && stream.language !== "und" ? `.${stream.language}` : "";
-
         if (kind === "audio") {
           const blob = await extractAudio({
             inputName: track.inputName,
@@ -221,9 +231,8 @@ export function useTrackQueue() {
           patchStream(trackId, kind, streamIndex, {
             status: "done",
             progress: 1,
-            result: { extension: stream.format },
+            result: { extension: stream.format, blob },
           });
-          downloadBlob(blob, `${base}${langTag}.${stream.format}`);
           return { blob, extension: stream.format };
         } else {
           const { blob, extension } = await extractSubtitle({
@@ -256,7 +265,16 @@ export function useTrackQueue() {
     [extractOneStream]
   );
 
-  // "Download": just saves the already-extracted subtitle blob, no re-extraction.
+  // "Download": just saves the already-extracted blob, no re-extraction.
+  const downloadOneAudio = useCallback((trackId, streamIndex) => {
+    const track = tracksRef.current.find((t) => t.id === trackId);
+    const stream = track?.audioStreams.find((s) => s.index === streamIndex);
+    if (!stream?.result?.blob) return;
+    const base = stripExt(track.name);
+    const langTag = stream.language && stream.language !== "und" ? `.${stream.language}` : "";
+    downloadBlob(stream.result.blob, `${base}${langTag}.${stream.result.extension}`);
+  }, []);
+
   const downloadOneSubtitle = useCallback((trackId, streamIndex) => {
     const track = tracksRef.current.find((t) => t.id === trackId);
     const stream = track?.subtitleStreams.find((s) => s.index === streamIndex);
@@ -328,7 +346,7 @@ export function useTrackQueue() {
             patchStream(trackId, kind, stream.index, {
               status: "done",
               progress: 1,
-              result: { extension: stream.format },
+              result: { extension: stream.format, blob },
             });
           } else {
             const { blob, extension } = await extractSubtitle({
@@ -341,7 +359,7 @@ export function useTrackQueue() {
             patchStream(trackId, kind, stream.index, {
               status: "done",
               progress: 1,
-              result: { extension },
+              result: { extension, blob },
             });
           }
           perStreamProgress[i] = 1;
@@ -349,12 +367,8 @@ export function useTrackQueue() {
         }
 
         const zipBlob = await zip.generateAsync({ type: "blob" });
-        if (kind === "subtitle") {
-          patchTrack(trackId, { [statusKey]: "done", [progressKey]: 1, subsAllResult: zipBlob });
-        } else {
-          downloadBlob(zipBlob, `${base}-audio.zip`);
-          patchTrack(trackId, { [statusKey]: "done", [progressKey]: 1 });
-        }
+        const resultKey = kind === "audio" ? "audioAllResult" : "subsAllResult";
+        patchTrack(trackId, { [statusKey]: "done", [progressKey]: 1, [resultKey]: zipBlob });
       } catch {
         patchTrack(trackId, { [statusKey]: "error", [progressKey]: 0 });
       }
@@ -368,7 +382,14 @@ export function useTrackQueue() {
     [extractAllOfKind]
   );
 
-  // "Download all": saves the already-built subtitles zip, no re-extraction.
+  // "Download all": saves the already-built zip, no re-extraction.
+  const downloadAllAudio = useCallback((trackId) => {
+    const track = tracksRef.current.find((t) => t.id === trackId);
+    if (!track?.audioAllResult) return;
+    const base = stripExt(track.name);
+    downloadBlob(track.audioAllResult, `${base}-audio.zip`);
+  }, []);
+
   const downloadAllSubtitles = useCallback((trackId) => {
     const track = tracksRef.current.find((t) => t.id === trackId);
     if (!track?.subsAllResult) return;
@@ -385,9 +406,11 @@ export function useTrackQueue() {
     removeTrack,
     extractOneAudio,
     extractOneSubtitle,
+    downloadOneAudio,
     downloadOneSubtitle,
     extractAllAudio,
     extractAllSubtitles,
+    downloadAllAudio,
     downloadAllSubtitles,
   };
 }

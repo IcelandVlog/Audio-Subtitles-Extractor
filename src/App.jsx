@@ -14,9 +14,11 @@ export default function App() {
     removeTrack,
     extractOneAudio,
     extractOneSubtitle,
+    downloadOneAudio,
     downloadOneSubtitle,
     extractAllAudio,
     extractAllSubtitles,
+    downloadAllAudio,
     downloadAllSubtitles,
   } = useTrackQueue();
 
@@ -80,9 +82,11 @@ export default function App() {
                 index={i}
                 onSetFormat={setAudioFormat}
                 onExtractOneAudio={extractOneAudio}
+                onDownloadOneAudio={downloadOneAudio}
                 onExtractOneSubtitle={extractOneSubtitle}
                 onDownloadOneSubtitle={downloadOneSubtitle}
                 onExtractAllAudio={extractAllAudio}
+                onDownloadAllAudio={downloadAllAudio}
                 onExtractAllSubtitles={extractAllSubtitles}
                 onDownloadAllSubtitles={downloadAllSubtitles}
                 onRemove={removeTrack}
