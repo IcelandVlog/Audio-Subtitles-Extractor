@@ -1,0 +1,104 @@
+:root {
+  color-scheme: dark;
+
+  /* ---- palette: audio console / phosphor tube ---- */
+  --bg: #0a0c0b;
+  --bg-grain: #0e100f;
+  --surface: #141715;
+  --surface-raised: #1b1f1c;
+  --surface-hover: #20241f;
+  --border: #262b27;
+  --border-soft: #1d211e;
+
+  --text: #e9ede8;
+  --text-muted: #8d968f;
+  --text-faint: #565e59;
+
+  --phosphor: #6fffa6;
+  --phosphor-dim: #3d8a5e;
+  --phosphor-glow: rgba(111, 255, 166, 0.35);
+
+  --amber: #ffb454;
+  --amber-dim: #8a6a34;
+
+  --red: #ff6b5d;
+
+  /* ---- type ---- */
+  --font-display: "Space Grotesk", "Arial Narrow", sans-serif;
+  --font-body: "IBM Plex Sans", -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", monospace;
+
+  --radius-sm: 3px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+h1, h2, h3 {
+  font-family: var(--font-display);
+}
+
+body {
+  background:
+    radial-gradient(ellipse 1200px 600px at 50% -10%, rgba(111, 255, 166, 0.06), transparent),
+    var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+::selection {
+  background: var(--phosphor-dim);
+  color: #041008;
+}
+
+a {
+  color: inherit;
+}
+
+button {
+  font-family: inherit;
+}
+
+/* subtle scanline / grain texture over everything, very low opacity */
+.grain {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  opacity: 0.035;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+:focus-visible {
+  outline: 2px solid var(--phosphor);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
