@@ -14,8 +14,11 @@ export default function App() {
     removeTrack,
     extractOneAudio,
     extractOneSubtitle,
+    showOneSubtitle,
+    downloadOneSubtitle,
     extractAllAudio,
     extractAllSubtitles,
+    downloadAllSubtitles,
   } = useTrackQueue();
 
   const anyBusy = tracks.some(
@@ -79,8 +82,11 @@ export default function App() {
                 onSetFormat={setAudioFormat}
                 onExtractOneAudio={extractOneAudio}
                 onExtractOneSubtitle={extractOneSubtitle}
+                onShowOneSubtitle={showOneSubtitle}
+                onDownloadOneSubtitle={downloadOneSubtitle}
                 onExtractAllAudio={extractAllAudio}
                 onExtractAllSubtitles={extractAllSubtitles}
+                onDownloadAllSubtitles={downloadAllSubtitles}
                 onRemove={removeTrack}
               />
             ))}

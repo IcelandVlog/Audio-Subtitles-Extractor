@@ -12,6 +12,9 @@ export default function StreamTable({
   onExtractOne,
   onExtractAll,
   onSetFormat,
+  onShowOne,
+  onDownloadOne,
+  onDownloadAll,
 }) {
   const isAudio = kind === "audio";
   const hasStreams = streams.length > 0;
@@ -24,6 +27,10 @@ export default function StreamTable({
         {hasStreams &&
           (allRunning ? (
             <span className="stream-table__all-progress">{Math.round(allProgress * 100)}%</span>
+          ) : !isAudio && allStatus === "done" ? (
+            <button className="stream-table__all-btn" onClick={onDownloadAll}>
+              Download all
+            </button>
           ) : (
             <button
               className="stream-table__all-btn"
@@ -69,24 +76,51 @@ export default function StreamTable({
               )}
 
               <div className="stream-row__action">
-                {s.status === "extracting" ? (
+                {isAudio ? (
+                  s.status === "extracting" ? (
+                    <span className="stream-row__pct">{Math.round(s.progress * 100)}%</span>
+                  ) : s.status === "done" ? (
+                    <button
+                      className="stream-row__link"
+                      onClick={() => onExtractOne(s.index)}
+                      title="Extract again"
+                    >
+                      ✓ done
+                    </button>
+                  ) : (
+                    <button
+                      className="stream-row__link"
+                      disabled={disabled}
+                      onClick={() => onExtractOne(s.index)}
+                    >
+                      Extract
+                    </button>
+                  )
+                ) : s.status === "extracting" ? (
                   <span className="stream-row__pct">{Math.round(s.progress * 100)}%</span>
-                ) : s.status === "done" ? (
-                  <button
-                    className="stream-row__link"
-                    onClick={() => onExtractOne(s.index)}
-                    title="Extract again"
-                  >
-                    ✓ done
-                  </button>
                 ) : (
-                  <button
-                    className="stream-row__link"
-                    disabled={disabled}
-                    onClick={() => onExtractOne(s.index)}
-                  >
-                    Extract
-                  </button>
+                  <>
+                    <button
+                      className="stream-row__link"
+                      disabled={disabled}
+                      onClick={() => onShowOne(s.index)}
+                    >
+                      Show
+                    </button>
+                    {s.status === "done" ? (
+                      <button className="stream-row__link" onClick={() => onDownloadOne(s.index)}>
+                        Download
+                      </button>
+                    ) : (
+                      <button
+                        className="stream-row__link"
+                        disabled={disabled}
+                        onClick={() => onExtractOne(s.index)}
+                      >
+                        Extract
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
               {s.status === "error" && <p className="stream-row__error">{s.error}</p>}

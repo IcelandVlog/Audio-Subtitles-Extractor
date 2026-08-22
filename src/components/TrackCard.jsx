@@ -15,8 +15,11 @@ export default function TrackCard({
   onSetFormat,
   onExtractOneAudio,
   onExtractOneSubtitle,
+  onShowOneSubtitle,
+  onDownloadOneSubtitle,
   onExtractAllAudio,
   onExtractAllSubtitles,
+  onDownloadAllSubtitles,
   onRemove,
 }) {
   const {
@@ -110,7 +113,10 @@ export default function TrackCard({
           allStatus={subsAllStatus}
           allProgress={subsAllProgress}
           onExtractOne={(streamIndex) => onExtractOneSubtitle(id, streamIndex)}
+          onShowOne={(streamIndex) => onShowOneSubtitle(id, streamIndex)}
+          onDownloadOne={(streamIndex) => onDownloadOneSubtitle(id, streamIndex)}
           onExtractAll={() => onExtractAllSubtitles(id)}
+          onDownloadAll={() => onDownloadAllSubtitles(id)}
         />
       </div>
 
