@@ -182,6 +182,19 @@ export function formatMatchesCodec(format, codec) {
   return (FORMAT_CODECS[format] || []).includes(codec);
 }
 
+// Reverse of FORMAT_CODECS: given a source codec, which dropdown format is
+// its native match. Used to auto-select the format that needs zero
+// re-encoding, so the common case never hits the slow convert step at all.
+const CODEC_TO_FORMAT = Object.entries(FORMAT_CODECS).reduce((acc, [format, codecs]) => {
+  codecs.forEach((c) => {
+    acc[c] = format;
+  });
+  return acc;
+}, {});
+export function defaultFormatForCodec(codec) {
+  return CODEC_TO_FORMAT[codec] || "mp3";
+}
+
 /**
  * Extract a single audio stream via stream copy (no re-encode) into whatever
  * container its codec fits natively. This is the "process the original

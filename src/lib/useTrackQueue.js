@@ -8,6 +8,7 @@ import {
   extractAudioNative,
   convertAudioFromNative,
   formatMatchesCodec,
+  defaultFormatForCodec,
 } from "./ffmpegEngine";
 import { downloadBlob, stripExt } from "./download";
 import { languageLabel } from "./languages";
@@ -45,7 +46,10 @@ function makeAudioStream(s) {
     codec: s.codec,
     language: s.language,
     label: languageLabel(s.language),
-    format: "mp3",
+    // Default to whatever format the source codec already is, so the first
+    // Extract is pure stream-copy end to end (no slow re-encode step). The
+    // user can still switch it — that just brings the convert step back.
+    format: defaultFormatForCodec(s.codec),
     status: "idle", // idle | extracting | done | error
     progress: 0,
     result: null, // { extension, blob } once extracted — kept for Download
