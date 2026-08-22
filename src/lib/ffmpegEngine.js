@@ -1,5 +1,5 @@
 import { FFmpeg } from "@ffmpeg/ffmpeg";
-import { fetchFile, toBlobURL } from "@ffmpeg/util";
+import { toBlobURL } from "@ffmpeg/util";
 
 // Served from our own /public folder instead of a third-party CDN — no CORS
 // dependency, no external outage/blocking risk, and everything really does
@@ -90,11 +90,13 @@ function parseProbeLog(log) {
 }
 
 /** Run `ffmpeg -i` (which always "fails" with no output) purely to read its stream report. */
-export function probeFile(file) {
+export function probeFile(file, { onProgress, onUploaded } = {}) {
   return runExclusive(async () => {
     const ffmpeg = await loadEngine();
     const inputName = safeName(file.name);
-    await ffmpeg.writeFile(inputName, await fetchFile(file));
+    const data = await readFileWithProgress(file, onProgress);
+    await ffmpeg.writeFile(inputName, data);
+    onUploaded?.();
 
     let log = "";
     const collector = ({ message }) => {
@@ -116,6 +118,21 @@ export function probeFile(file) {
 
 function safeName(name) {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+/** Read a File into memory while reporting real byte-level progress (0..1). */
+function readFileWithProgress(file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onprogress = (e) => {
+      if (onProgress && e.lengthComputable) {
+        onProgress(e.loaded / e.total);
+      }
+    };
+    reader.onload = () => resolve(new Uint8Array(reader.result));
+    reader.onerror = () => reject(reader.error || new Error("Couldn't read this file."));
+    reader.readAsArrayBuffer(file);
+  });
 }
 
 const AUDIO_ENCODERS = {

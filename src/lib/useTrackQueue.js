@@ -123,7 +123,8 @@ export function useTrackQueue() {
         file,
         name: file.name,
         size: file.size,
-        status: "queued", // queued | probing | ready | error
+        status: "queued", // queued | uploading | probing | ready | error
+        uploadProgress: 0,
         duration: null,
         audioStreams: [],
         subtitleStreams: [],
@@ -157,9 +158,12 @@ export function useTrackQueue() {
 
       // probe files one at a time — they all share the single ffmpeg instance
       for (const t of newTracks) {
-        patchTrack(t.id, { status: "probing" });
+        patchTrack(t.id, { status: "uploading", uploadProgress: 0 });
         try {
-          const { inputName, streams, duration } = await probeFile(t.file);
+          const { inputName, streams, duration } = await probeFile(t.file, {
+            onProgress: (p) => patchTrack(t.id, { uploadProgress: p }),
+            onUploaded: () => patchTrack(t.id, { status: "probing" }),
+          });
           const audioStreams = streams.filter((s) => s.type === "Audio").map(makeAudioStream);
           const subtitleStreams = streams.filter((s) => s.type === "Subtitle").map(makeSubtitleStream);
           patchTrack(t.id, {

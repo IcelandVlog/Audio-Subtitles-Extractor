@@ -268,7 +268,8 @@
   color: var(--text-faint);
   cursor: pointer;
   font-size: 13px;
-  padding: 4px;
+  padding: 12px;
+  margin: -12px;
   line-height: 1;
   transition: color 0.15s ease;
 }

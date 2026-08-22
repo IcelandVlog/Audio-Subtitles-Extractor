@@ -3,6 +3,7 @@ import StreamTable from "./StreamTable";
 
 const STATUS_LABEL = {
   queued: "queued",
+  uploading: "uploading",
   probing: "reading streams…",
   ready: "ready",
   error: "error",
@@ -30,6 +31,7 @@ export default function TrackCard({
     audioAllProgress,
     subsAllStatus,
     subsAllProgress,
+    uploadProgress,
     error,
     warning,
   } = track;
@@ -52,7 +54,9 @@ export default function TrackCard({
     ...subtitleStreams.filter((s) => s.status === "extracting").map((s) => s.progress),
   ].filter((p) => p != null);
   const overallProgress =
-    runningProgresses.length > 0
+    status === "uploading"
+      ? uploadProgress
+      : runningProgresses.length > 0
       ? runningProgresses.reduce((a, b) => a + b, 0) / runningProgresses.length
       : null;
 
@@ -69,7 +73,10 @@ export default function TrackCard({
           <p className="track__sub">
             {formatDuration(duration)} <span className="dot">·</span> {formatSize(size)}
             <span className="dot">·</span>
-            <span className={`track__status track__status--${status}`}>{STATUS_LABEL[status]}</span>
+            <span className={`track__status track__status--${status}`}>
+              {STATUS_LABEL[status]}
+              {status === "uploading" ? ` ${Math.round(uploadProgress * 100)}%` : ""}
+            </span>
           </p>
         </div>
         <button className="track__remove" onClick={() => onRemove(id)} aria-label={`Remove ${name}`}>
