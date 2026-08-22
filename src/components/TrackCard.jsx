@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { formatDuration, formatSize } from "../lib/format";
 import StreamTable from "./StreamTable";
 
@@ -22,6 +23,8 @@ export default function TrackCard({
   onDownloadAllSubtitles,
   onRemove,
 }) {
+  const [collapsed, setCollapsed] = useState(false);
+
   const {
     id,
     name,
@@ -65,7 +68,19 @@ export default function TrackCard({
 
   return (
     <div className={`track track--${status}`}>
-      <div className="track__meta">
+      <div
+        className="track__meta"
+        onClick={() => setCollapsed((c) => !c)}
+        role="button"
+        tabIndex={0}
+        aria-expanded={!collapsed}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setCollapsed((c) => !c);
+          }
+        }}
+      >
         <div className="track__index" aria-hidden="true">
           {String(index + 1).padStart(2, "0")}
         </div>
@@ -82,7 +97,20 @@ export default function TrackCard({
             </span>
           </p>
         </div>
-        <button className="track__remove" onClick={() => onRemove(id)} aria-label={`Remove ${name}`}>
+        <span
+          className={`track__chevron ${collapsed ? "track__chevron--collapsed" : ""}`}
+          aria-hidden="true"
+        >
+          ▾
+        </span>
+        <button
+          className="track__remove"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove(id);
+          }}
+          aria-label={`Remove ${name}`}
+        >
           ✕
         </button>
       </div>
@@ -93,32 +121,34 @@ export default function TrackCard({
         </div>
       )}
 
-      <div className="track__tables">
-        <StreamTable
-          kind="audio"
-          title="Audio tracks"
-          streams={audioStreams}
-          disabled={notReady || busy}
-          allStatus={audioAllStatus}
-          allProgress={audioAllProgress}
-          onExtractOne={(streamIndex) => onExtractOneAudio(id, streamIndex)}
-          onExtractAll={() => onExtractAllAudio(id)}
-          onSetFormat={(streamIndex, format) => onSetFormat(id, streamIndex, format)}
-        />
-        <StreamTable
-          kind="subtitle"
-          title="Subtitle tracks"
-          streams={subtitleStreams}
-          disabled={notReady || busy}
-          allStatus={subsAllStatus}
-          allProgress={subsAllProgress}
-          onExtractOne={(streamIndex) => onExtractOneSubtitle(id, streamIndex)}
-          onShowOne={(streamIndex) => onShowOneSubtitle(id, streamIndex)}
-          onDownloadOne={(streamIndex) => onDownloadOneSubtitle(id, streamIndex)}
-          onExtractAll={() => onExtractAllSubtitles(id)}
-          onDownloadAll={() => onDownloadAllSubtitles(id)}
-        />
-      </div>
+      {!collapsed && (
+        <div className="track__tables">
+          <StreamTable
+            kind="audio"
+            title="Audio tracks"
+            streams={audioStreams}
+            disabled={notReady || busy}
+            allStatus={audioAllStatus}
+            allProgress={audioAllProgress}
+            onExtractOne={(streamIndex) => onExtractOneAudio(id, streamIndex)}
+            onExtractAll={() => onExtractAllAudio(id)}
+            onSetFormat={(streamIndex, format) => onSetFormat(id, streamIndex, format)}
+          />
+          <StreamTable
+            kind="subtitle"
+            title="Subtitle tracks"
+            streams={subtitleStreams}
+            disabled={notReady || busy}
+            allStatus={subsAllStatus}
+            allProgress={subsAllProgress}
+            onExtractOne={(streamIndex) => onExtractOneSubtitle(id, streamIndex)}
+            onShowOne={(streamIndex) => onShowOneSubtitle(id, streamIndex)}
+            onDownloadOne={(streamIndex) => onDownloadOneSubtitle(id, streamIndex)}
+            onExtractAll={() => onExtractAllSubtitles(id)}
+            onDownloadAll={() => onDownloadAllSubtitles(id)}
+          />
+        </div>
+      )}
 
       {status === "error" && <p className="track__error">{error}</p>}
       {status !== "error" && warning && <p className="track__warning">{warning}</p>}

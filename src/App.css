@@ -215,6 +215,7 @@
   display: flex;
   align-items: flex-start;
   gap: 14px;
+  cursor: pointer;
 }
 
 .track__index {
@@ -260,6 +261,18 @@
 }
 .track__status--error {
   color: var(--red);
+}
+
+.track__chevron {
+  flex-shrink: 0;
+  color: var(--text-faint);
+  font-size: 11px;
+  margin-top: 2px;
+  transition: transform 0.15s ease;
+}
+
+.track__chevron--collapsed {
+  transform: rotate(-90deg);
 }
 
 .track__remove {
