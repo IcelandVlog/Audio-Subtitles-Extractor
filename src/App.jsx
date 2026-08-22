@@ -5,8 +5,16 @@ import TrackRow from "./components/TrackRow";
 import "./App.css";
 
 export default function App() {
-  const { tracks, engineState, addFiles, setAudioFormat, toggleSubtitles, removeTrack, runExtraction } =
-    useTrackQueue();
+  const {
+    tracks,
+    engineState,
+    engineError,
+    addFiles,
+    setAudioFormat,
+    toggleSubtitles,
+    removeTrack,
+    runExtraction,
+  } = useTrackQueue();
 
   const anyBusy = tracks.some((t) => t.status === "extracting" || t.status === "probing");
 
@@ -43,6 +51,8 @@ export default function App() {
           </p>
           <Meter active={anyBusy} />
         </section>
+
+        {engineState === "error" && <p className="engine-error">{engineError}</p>}
 
         <Dropzone onFiles={addFiles} engineState={engineState} />
 

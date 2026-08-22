@@ -6,9 +6,32 @@ const nextId = () => `track-${++idCounter}`;
 
 const VIDEO_TYPES = /\.(mp4|mov|mkv|avi|flv|webm|m4v|wmv)$/i;
 
+// Very large files roughly double their size in browser memory (original + wasm FS
+// copy) and can exceed what the tab is allowed to hold. Warn rather than block.
+const LARGE_FILE_WARNING_BYTES = 1.5 * 1024 * 1024 * 1024;
+
+const ENGINE_LOAD_TIMEOUT_MS = 60_000;
+
+function withTimeout(promise, ms, message) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      }
+    );
+  });
+}
+
 export function useTrackQueue() {
   const [tracks, setTracks] = useState([]);
-  const [engineState, setEngineState] = useState("idle"); // idle | loading | ready
+  const [engineState, setEngineState] = useState("idle"); // idle | loading | ready | error
+  const [engineError, setEngineError] = useState(null);
   const engineRequested = useRef(false);
 
   const patchTrack = useCallback((id, patch) => {
@@ -19,8 +42,24 @@ export function useTrackQueue() {
     if (engineRequested.current) return;
     engineRequested.current = true;
     setEngineState("loading");
-    await loadEngine();
-    setEngineState("ready");
+    setEngineError(null);
+    try {
+      await withTimeout(
+        loadEngine(),
+        ENGINE_LOAD_TIMEOUT_MS,
+        "Timed out loading the processing engine."
+      );
+      setEngineState("ready");
+    } catch (err) {
+      // allow the user to retry (e.g. after fixing their connection)
+      engineRequested.current = false;
+      setEngineState("error");
+      setEngineError(
+        "Couldn't load the audio engine. Check your internet connection — this app downloads " +
+          "an ffmpeg core (~30MB) from a CDN the first time — and try adding the file again."
+      );
+      throw err;
+    }
   }, []);
 
   const addFiles = useCallback(
@@ -43,11 +82,28 @@ export function useTrackQueue() {
         audioResult: null,
         subtitleResult: null,
         error: null,
+        warning:
+          file.size > LARGE_FILE_WARNING_BYTES
+            ? "Large file — this may be slow or run out of memory in some browsers."
+            : null,
         inputName: null,
       }));
 
       setTracks((prev) => [...prev, ...newTracks]);
-      await ensureEngine();
+
+      try {
+        await ensureEngine();
+      } catch {
+        // engine failed to load: surface the error on every track we just queued
+        // instead of leaving them stuck at "queued" forever.
+        newTracks.forEach((t) =>
+          patchTrack(t.id, {
+            status: "error",
+            error: "Engine failed to load. See the message above the upload box.",
+          })
+        );
+        return;
+      }
 
       for (const t of newTracks) {
         patchTrack(t.id, { status: "probing" });
@@ -125,6 +181,7 @@ export function useTrackQueue() {
   return {
     tracks,
     engineState,
+    engineError,
     addFiles,
     setAudioFormat,
     toggleSubtitles,

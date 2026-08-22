@@ -43,6 +43,8 @@ export default function Dropzone({ onFiles, engineState }) {
       <p className="dropzone__note">
         {engineState === "loading"
           ? "Warming up the engine…"
+          : engineState === "error"
+          ? "Engine didn't load — try adding the file again."
           : "Runs entirely in this tab. Nothing leaves your device."}
       </p>
     </div>

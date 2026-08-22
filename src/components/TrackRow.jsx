@@ -25,6 +25,7 @@ export default function TrackRow({ track, index, onSetFormat, onToggleSubs, onEx
     audioResult,
     subtitleResult,
     error,
+    warning,
   } = track;
 
   const busy = status === "probing" || status === "extracting";
@@ -126,6 +127,7 @@ export default function TrackRow({ track, index, onSetFormat, onToggleSubs, onEx
         )}
 
         {status === "error" && <p className="track__error">{error}</p>}
+        {status !== "error" && warning && <p className="track__warning">{warning}</p>}
       </div>
     </div>
   );

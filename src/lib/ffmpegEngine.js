@@ -23,7 +23,11 @@ export function loadEngine(onLog) {
     await ffmpeg.load({ coreURL, wasmURL });
     ffmpegInstance = ffmpeg;
     return ffmpeg;
-  })();
+  })().catch((err) => {
+    // don't cache a failed load — let the next call retry from scratch
+    loadPromise = null;
+    throw err;
+  });
 
   return loadPromise;
 }
