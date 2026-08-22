@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { formatDuration, formatSize } from "../lib/format";
 import StreamTable from "./StreamTable";
+import SubtitlePreviewModal from "./SubtitlePreviewModal";
 
 const STATUS_LABEL = {
   queued: "queued",
@@ -16,7 +17,6 @@ export default function TrackCard({
   onSetFormat,
   onExtractOneAudio,
   onExtractOneSubtitle,
-  onShowOneSubtitle,
   onDownloadOneSubtitle,
   onExtractAllAudio,
   onExtractAllSubtitles,
@@ -24,6 +24,7 @@ export default function TrackCard({
   onRemove,
 }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [preview, setPreview] = useState(null); // extracted subtitle text currently shown in the modal, or null
 
   const {
     id,
@@ -65,6 +66,17 @@ export default function TrackCard({
       : runningProgresses.length > 0
       ? runningProgresses.reduce((a, b) => a + b, 0) / runningProgresses.length
       : null;
+
+  const handleShowSubtitle = async (streamIndex) => {
+    const stream = subtitleStreams.find((s) => s.index === streamIndex);
+    if (!stream?.result?.blob) return;
+    try {
+      const text = await stream.result.blob.text();
+      setPreview(text);
+    } catch {
+      setPreview("Couldn't read this subtitle file.");
+    }
+  };
 
   return (
     <div className={`track track--${status}`}>
@@ -142,7 +154,7 @@ export default function TrackCard({
             allStatus={subsAllStatus}
             allProgress={subsAllProgress}
             onExtractOne={(streamIndex) => onExtractOneSubtitle(id, streamIndex)}
-            onShowOne={(streamIndex) => onShowOneSubtitle(id, streamIndex)}
+            onShowOne={handleShowSubtitle}
             onDownloadOne={(streamIndex) => onDownloadOneSubtitle(id, streamIndex)}
             onExtractAll={() => onExtractAllSubtitles(id)}
             onDownloadAll={() => onDownloadAllSubtitles(id)}
@@ -152,6 +164,8 @@ export default function TrackCard({
 
       {status === "error" && <p className="track__error">{error}</p>}
       {status !== "error" && warning && <p className="track__warning">{warning}</p>}
+
+      {preview != null && <SubtitlePreviewModal text={preview} onClose={() => setPreview(null)} />}
     </div>
   );
 }

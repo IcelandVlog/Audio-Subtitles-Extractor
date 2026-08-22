@@ -256,23 +256,6 @@ export function useTrackQueue() {
     [extractOneStream]
   );
 
-  // "Show": reuses the cached blob if this stream was already extracted,
-  // otherwise runs the extraction first, then opens it as a page in a new tab.
-  const showOneSubtitle = useCallback(
-    async (trackId, streamIndex) => {
-      const track = tracksRef.current.find((t) => t.id === trackId);
-      const existing = track?.subtitleStreams.find((s) => s.index === streamIndex);
-      const result =
-        existing?.result?.blob ? existing.result : await extractOneStream(trackId, "subtitle", streamIndex);
-      if (!result?.blob) return;
-      const url = URL.createObjectURL(result.blob);
-      window.open(url, "_blank", "noopener");
-      // give the new tab time to load the blob before we free it
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    },
-    [extractOneStream]
-  );
-
   // "Download": just saves the already-extracted subtitle blob, no re-extraction.
   const downloadOneSubtitle = useCallback((trackId, streamIndex) => {
     const track = tracksRef.current.find((t) => t.id === trackId);
@@ -402,7 +385,6 @@ export function useTrackQueue() {
     removeTrack,
     extractOneAudio,
     extractOneSubtitle,
-    showOneSubtitle,
     downloadOneSubtitle,
     extractAllAudio,
     extractAllSubtitles,

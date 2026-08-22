@@ -98,29 +98,26 @@ export default function StreamTable({
                   )
                 ) : s.status === "extracting" ? (
                   <span className="stream-row__pct">{Math.round(s.progress * 100)}%</span>
-                ) : (
+                ) : s.status === "done" ? (
                   <>
                     <button
                       className="stream-row__link"
-                      disabled={disabled}
                       onClick={() => onShowOne(s.index)}
                     >
                       Show
                     </button>
-                    {s.status === "done" ? (
-                      <button className="stream-row__link" onClick={() => onDownloadOne(s.index)}>
-                        Download
-                      </button>
-                    ) : (
-                      <button
-                        className="stream-row__link"
-                        disabled={disabled}
-                        onClick={() => onExtractOne(s.index)}
-                      >
-                        Extract
-                      </button>
-                    )}
+                    <button className="stream-row__link" onClick={() => onDownloadOne(s.index)}>
+                      Download
+                    </button>
                   </>
+                ) : (
+                  <button
+                    className="stream-row__link"
+                    disabled={disabled}
+                    onClick={() => onExtractOne(s.index)}
+                  >
+                    Extract
+                  </button>
                 )}
               </div>
               {s.status === "error" && <p className="stream-row__error">{s.error}</p>}

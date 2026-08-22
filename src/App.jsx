@@ -14,7 +14,6 @@ export default function App() {
     removeTrack,
     extractOneAudio,
     extractOneSubtitle,
-    showOneSubtitle,
     downloadOneSubtitle,
     extractAllAudio,
     extractAllSubtitles,
@@ -82,7 +81,6 @@ export default function App() {
                 onSetFormat={setAudioFormat}
                 onExtractOneAudio={extractOneAudio}
                 onExtractOneSubtitle={extractOneSubtitle}
-                onShowOneSubtitle={showOneSubtitle}
                 onDownloadOneSubtitle={downloadOneSubtitle}
                 onExtractAllAudio={extractAllAudio}
                 onExtractAllSubtitles={extractAllSubtitles}
