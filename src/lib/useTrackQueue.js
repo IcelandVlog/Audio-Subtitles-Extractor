@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import JSZip from "jszip";
-import { probeFile, extractAudio, extractSubtitle, cleanupInput, loadEngine } from "./ffmpegEngine";
+import {
+  probeFile,
+  extractSubtitle,
+  cleanupInput,
+  loadEngine,
+  extractAudioNative,
+  convertAudioFromNative,
+  formatMatchesCodec,
+} from "./ffmpegEngine";
 import { downloadBlob, stripExt } from "./download";
 import { languageLabel } from "./languages";
 
@@ -41,6 +49,7 @@ function makeAudioStream(s) {
     status: "idle", // idle | extracting | done | error
     progress: 0,
     result: null, // { extension, blob } once extracted — kept for Download
+    native: null, // { blob, extension, codec } — original stream, copied not re-encoded; cached so switching format doesn't re-touch the source video
     error: null,
   };
 }
@@ -188,7 +197,10 @@ export function useTrackQueue() {
       const track = tracksRef.current.find((t) => t.id === trackId);
       const stream = track?.audioStreams.find((s) => s.index === streamIndex);
       const patch = { format };
-      // a previous result was for the old format — drop it so Extract runs again
+      // a previous result was for the old format — drop it so Extract runs again.
+      // `native` (the stream-copied original) is intentionally left alone: the
+      // next Extract click converts from that cached copy instead of
+      // re-reading the whole video.
       if (stream && (stream.status === "done" || stream.status === "error")) {
         patch.status = "idle";
         patch.progress = 0;
@@ -222,12 +234,33 @@ export function useTrackQueue() {
       patchStream(trackId, kind, streamIndex, { status: "extracting", progress: 0, error: null });
       try {
         if (kind === "audio") {
-          const blob = await extractAudio({
-            inputName: track.inputName,
-            streamIndex,
-            format: stream.format,
-            onProgress: (p) => patchStream(trackId, kind, streamIndex, { progress: p }),
-          });
+          // Step 1: get the original track via stream copy (no re-encode) —
+          // fast regardless of video length. Cached so a later format switch
+          // reuses it instead of re-touching the source video.
+          let native = stream.native;
+          if (!native) {
+            native = await extractAudioNative({
+              inputName: track.inputName,
+              streamIndex,
+              codec: stream.codec,
+              onProgress: (p) => patchStream(trackId, kind, streamIndex, { progress: p * 0.6 }),
+            });
+            patchStream(trackId, kind, streamIndex, { native });
+          }
+
+          // Step 2: only re-process (convert) if the requested format isn't
+          // already what the native track is — and only from the small
+          // extracted track, not the whole video.
+          const blob = formatMatchesCodec(stream.format, native.codec)
+            ? native.blob
+            : await convertAudioFromNative({
+                nativeBlob: native.blob,
+                nativeExtension: native.extension,
+                streamIndex,
+                format: stream.format,
+                onProgress: (p) => patchStream(trackId, kind, streamIndex, { progress: 0.6 + p * 0.4 }),
+              });
+
           patchStream(trackId, kind, streamIndex, {
             status: "done",
             progress: 1,
@@ -336,12 +369,25 @@ export function useTrackQueue() {
           const langTag = stream.language && stream.language !== "und" ? `.${stream.language}` : "";
 
           if (kind === "audio") {
-            const blob = await extractAudio({
-              inputName: track.inputName,
-              streamIndex: stream.index,
-              format: stream.format,
-              onProgress,
-            });
+            let native = stream.native;
+            if (!native) {
+              native = await extractAudioNative({
+                inputName: track.inputName,
+                streamIndex: stream.index,
+                codec: stream.codec,
+                onProgress: (p) => onProgress(p * 0.6),
+              });
+              patchStream(trackId, kind, stream.index, { native });
+            }
+            const blob = formatMatchesCodec(stream.format, native.codec)
+              ? native.blob
+              : await convertAudioFromNative({
+                  nativeBlob: native.blob,
+                  nativeExtension: native.extension,
+                  streamIndex: stream.index,
+                  format: stream.format,
+                  onProgress: (p) => onProgress(0.6 + p * 0.4),
+                });
             zip.file(uniqueName(`${base}${langTag}.${stream.format}`), blob);
             patchStream(trackId, kind, stream.index, {
               status: "done",

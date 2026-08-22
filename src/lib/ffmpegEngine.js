@@ -143,6 +143,114 @@ const AUDIO_ENCODERS = {
   aac: ["-c:a", "aac", "-b:a", "192k"],
 };
 
+// Container that can hold a given codec unmodified (for -c:a copy). "mka"
+// (Matroska audio) is the catch-all fallback since it can mux almost any
+// codec without re-encoding.
+const NATIVE_CONTAINER = {
+  aac: "aac",
+  mp3: "mp3",
+  mp2: "mp2",
+  flac: "flac",
+  vorbis: "ogg",
+  opus: "ogg",
+  pcm_s16le: "wav",
+  pcm_s24le: "wav",
+  pcm_s32le: "wav",
+  pcm_f32le: "wav",
+  pcm_u8: "wav",
+  ac3: "ac3",
+  eac3: "eac3",
+  dts: "dts",
+  alac: "m4a",
+  wmav2: "wma",
+  wmapro: "wma",
+};
+function nativeContainerFor(codec) {
+  return NATIVE_CONTAINER[codec] || "mka";
+}
+
+// Which source codecs already satisfy a given requested output format, so we
+// can skip re-encoding entirely and just hand back the native-copied file.
+const FORMAT_CODECS = {
+  mp3: ["mp3"],
+  wav: ["pcm_s16le", "pcm_s24le", "pcm_s32le", "pcm_f32le", "pcm_u8"],
+  ogg: ["vorbis", "opus"],
+  flac: ["flac"],
+  aac: ["aac"],
+};
+export function formatMatchesCodec(format, codec) {
+  return (FORMAT_CODECS[format] || []).includes(codec);
+}
+
+/**
+ * Extract a single audio stream via stream copy (no re-encode) into whatever
+ * container its codec fits natively. This is the "process the original
+ * first" step — it only ever demuxes/remuxes, so it's near-instant even on
+ * long videos. The result is cached by the caller and reused as the source
+ * for any later format conversion, instead of re-reading the whole video.
+ */
+export function extractAudioNative({ inputName, streamIndex, codec, onProgress }) {
+  return runExclusive(async () => {
+    const ffmpeg = await loadEngine();
+    const extension = nativeContainerFor(codec);
+    const outputName = `native_${streamIndex}.${extension}`;
+
+    const progressHandler = ({ progress }) => {
+      if (onProgress && Number.isFinite(progress)) onProgress(Math.min(Math.max(progress, 0), 1));
+    };
+    ffmpeg.on("progress", progressHandler);
+    try {
+      await ffmpeg.exec([
+        "-i",
+        inputName,
+        "-map",
+        `0:${streamIndex}`,
+        "-vn",
+        "-c:a",
+        "copy",
+        outputName,
+      ]);
+      const data = await ffmpeg.readFile(outputName);
+      return { blob: new Blob([data.buffer]), extension, codec };
+    } finally {
+      ffmpeg.off("progress", progressHandler);
+      await ffmpeg.deleteFile(outputName).catch(() => {});
+    }
+  });
+}
+
+/**
+ * Convert an already-extracted native audio blob (small — just that one
+ * track) into the requested format. Re-processes only that small file, never
+ * the source video, so switching output format after the first extract is
+ * fast regardless of video length.
+ */
+export function convertAudioFromNative({ nativeBlob, nativeExtension, streamIndex, format, onProgress }) {
+  return runExclusive(async () => {
+    const ffmpeg = await loadEngine();
+    const inputName = `native_in_${streamIndex}.${nativeExtension}`;
+    const outputName = `converted_${streamIndex}.${format}`;
+    const encoderArgs = AUDIO_ENCODERS[format] || AUDIO_ENCODERS.mp3;
+
+    const data = new Uint8Array(await nativeBlob.arrayBuffer());
+    await ffmpeg.writeFile(inputName, data);
+
+    const progressHandler = ({ progress }) => {
+      if (onProgress && Number.isFinite(progress)) onProgress(Math.min(Math.max(progress, 0), 1));
+    };
+    ffmpeg.on("progress", progressHandler);
+    try {
+      await ffmpeg.exec(["-i", inputName, ...encoderArgs, outputName]);
+      const outData = await ffmpeg.readFile(outputName);
+      return new Blob([outData.buffer], { type: `audio/${format}` });
+    } finally {
+      ffmpeg.off("progress", progressHandler);
+      await ffmpeg.deleteFile(inputName).catch(() => {});
+      await ffmpeg.deleteFile(outputName).catch(() => {});
+    }
+  });
+}
+
 /** Extract a single audio stream (by absolute ffmpeg stream index) to the requested format. */
 export function extractAudio({ inputName, streamIndex, format, onProgress }) {
   return runExclusive(async () => {
