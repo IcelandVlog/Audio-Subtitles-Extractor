@@ -13,6 +13,7 @@
     "@ffmpeg/core": "^0.12.6",
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
+    "@huggingface/transformers": "^4.2.0",
     "jspdf": "^4.2.1",
     "jszip": "^3.10.1",
     "pinyin-pro": "^3.29.3",

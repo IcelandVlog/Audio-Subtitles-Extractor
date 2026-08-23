@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { useTrackQueue } from "./lib/useTrackQueue";
 import { usePath, toolPathFor, toolIdFromPath } from "./lib/router";
 import Meter from "./components/Meter";
@@ -8,6 +8,10 @@ import AllToolsMenu from "./components/AllToolsMenu";
 import ToolPage from "./components/ToolPage";
 import LyricsEditor from "./components/LyricsEditor";
 import "./App.css";
+
+// Pulls in @huggingface/transformers + onnxruntime-web (large) — only fetched
+// when someone actually opens this tool, not on every page load.
+const VideoTranscriber = lazy(() => import("./components/VideoTranscriber"));
 
 const THEME_KEY = "strip-theme";
 
@@ -86,6 +90,16 @@ export default function App() {
 
       {activeToolId === "timed-lyrics-editor" ? (
         <LyricsEditor onHome={goHome} />
+      ) : activeToolId === "video-to-subtitles" ? (
+        <Suspense
+          fallback={
+            <main className="shell">
+              <p className="tool-page__hint">Loading the transcriber…</p>
+            </main>
+          }
+        >
+          <VideoTranscriber onHome={goHome} />
+        </Suspense>
       ) : activeToolId ? (
         <ToolPage key={activeToolId} toolId={activeToolId} onHome={goHome} />
       ) : (

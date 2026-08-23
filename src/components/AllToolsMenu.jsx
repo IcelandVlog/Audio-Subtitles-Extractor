@@ -39,6 +39,7 @@ const CATEGORIES = [
     items: [
       { id: "subtitle-merger", label: "Subtitle Merger" },
       { id: "extract-subtitles-from-video", label: "Extract Subtitles from Video", badge: "New!" },
+      { id: "video-to-subtitles", label: "Video to Subtitle Converter", badge: "New!" },
       { id: "timed-lyrics-editor", label: "Timed Lyrics Editor", badge: "New!" },
       { id: "color-changer", label: "Color changer" },
       { id: "position-changer", label: "Position changer" },

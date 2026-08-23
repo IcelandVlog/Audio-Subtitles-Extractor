@@ -1248,3 +1248,11 @@
     display: none;
   }
 }
+
+.lyrics-row--transcript {
+  grid-template-columns: 72px 1fr;
+}
+
+.lyrics-row__time--static {
+  cursor: default;
+}
