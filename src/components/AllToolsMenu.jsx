@@ -1,62 +1,158 @@
 import { useEffect, useRef, useState } from "react";
-import { TOOL_CATEGORIES } from "../lib/toolsRegistry";
+
+const CATEGORIES = [
+  {
+    id: "converters",
+    label: "CONVERTERS",
+    icon: "⇄",
+    items: [
+      "Convert to Srt",
+      "Convert to WebVtt",
+      "Sup to Srt Converter",
+      "Sub/Idx to Srt Converter",
+      "Convert to Plain Text",
+      "Convert to PDF",
+    ],
+  },
+  {
+    id: "syncing",
+    label: "SYNCING",
+    icon: "↻",
+    items: ["Subtitle Shifter", "Partial Subtitle Shifter"],
+  },
+  {
+    id: "fixing",
+    label: "FIXING",
+    icon: "⧉",
+    items: ["Srt Cleaner", "Convert to UTF-8"],
+  },
+  {
+    id: "other",
+    label: "OTHER",
+    icon: "✦",
+    items: ["Subtitle Merger"],
+  },
+];
 
 export default function AllToolsMenu() {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  // every category starts open, matching the screenshot
+  const [openCats, setOpenCats] = useState(() =>
+    Object.fromEntries(CATEGORIES.map((c) => [c.id, true]))
+  );
+  const menuRef = useRef(null);
+  const btnRef = useRef(null);
+
+  const toggleCategory = (id) => {
+    setOpenCats((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  // close on outside click / tap and on Escape
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    const handlePointer = (e) => {
+      if (
+        menuRef.current &&
+        !menuRef.current.contains(e.target) &&
+        btnRef.current &&
+        !btnRef.current.contains(e.target)
+      ) {
+        setMenuOpen(false);
+      }
+    };
+    const handleKey = (e) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+
+    document.addEventListener("pointerdown", handlePointer);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointer);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [menuOpen]);
+
+  return (
+    <div className="all-tools">
+      <button
+        ref={btnRef}
+        type="button"
+        className={`all-tools__btn ${menuOpen ? "all-tools__btn--open" : ""}`}
+        aria-expanded={menuOpen}
+        aria-haspopup="true"
+        onClick={() => setMenuOpen((v) => !v)}
+      >
+        All tools <span className="all-tools__caret">{menuOpen ? "⌃" : "⌄"}</span>
+      </button>
+
+      {menuOpen && (
+        <div className="all-tools__panel" ref={menuRef} role="menu">
+          {CATEGORIES.map((cat) => {
+            const isOpen = !!openCats[cat.id];
+            return (
+              <div className="cat-group" key={cat.id}>
+                <button
+                  type="button"
+                  className={`cat-header ${isOpen ? "cat-header--open" : ""}`}
+                  aria-expanded={isOpen}
+                  onClick={() => toggleCategory(cat.id)}
+                >
+                  <span className="cat-header__label">
+                    <span className="cat-header__icon" aria-hidden="true">
+                      {cat.icon}
+                    </span>
+                    {cat.label}
+                  </span>
+                  <span className="cat-header__chev" aria-hidden="true">
+                    ⌄
+                  </span>
+                </button>
+
+                <CategoryItems open={isOpen} items={cat.items} />
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CategoryItems({ open, items }) {
+  const innerRef = useRef(null);
+  const [maxHeight, setMaxHeight] = useState(open ? "none" : "0px");
 
   useEffect(() => {
-    if (!open) return;
-    const onDocClick = (e) => {
-      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
-    };
-    const onKey = (e) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDocClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDocClick);
-      document.removeEventListener("keydown", onKey);
-    };
+    const el = innerRef.current;
+    if (!el) return;
+
+    if (open) {
+      // measure real content height so the animation is exact, no clipped/extra space
+      const h = el.scrollHeight;
+      setMaxHeight(h + "px");
+      const t = setTimeout(() => setMaxHeight("none"), 220);
+      return () => clearTimeout(t);
+    } else {
+      // if it was "none", first snap to the current pixel height, then collapse
+      const h = el.scrollHeight;
+      setMaxHeight(h + "px");
+      requestAnimationFrame(() => setMaxHeight("0px"));
+    }
   }, [open]);
 
   return (
-    <div className="all-tools" ref={rootRef}>
-      <button
-        type="button"
-        className={`all-tools__trigger ${open ? "all-tools__trigger--open" : ""}`}
-        onClick={() => setOpen((o) => !o)}
-        aria-haspopup="true"
-        aria-expanded={open}
-      >
-        All tools
-        <span className="all-tools__chevron">▾</span>
-      </button>
-
-      {open && (
-        <div className="all-tools__panel" role="menu">
-          {TOOL_CATEGORIES.map((cat) => (
-            <div className="all-tools__col" key={cat.key}>
-              <div className="all-tools__colhead">
-                <span className="all-tools__icon">{cat.icon}</span>
-                {cat.label.toUpperCase()}
-              </div>
-              <ul className="all-tools__list">
-                {cat.tools.map((t) => (
-                  <li key={t.id}>
-                    <a href={`#/${t.route === "/" ? "" : t.route}`} onClick={() => setOpen(false)}>
-                      <span className="all-tools__caret">›</span>
-                      {t.label}
-                      {t.badge && <span className="all-tools__new">{t.badge}</span>}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-      )}
+    <div
+      className={`cat-items ${open ? "cat-items--open" : ""}`}
+      style={{ maxHeight }}
+    >
+      <div ref={innerRef}>
+        {items.map((item) => (
+          <div className="cat-items__item" key={item} role="menuitem">
+            <span aria-hidden="true">›</span> {item}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
