@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useTrackQueue } from "./lib/useTrackQueue";
+import { usePath, toolPathFor, toolIdFromPath } from "./lib/router";
 import Meter from "./components/Meter";
 import Dropzone from "./components/Dropzone";
 import TrackCard from "./components/TrackCard";
 import AllToolsMenu from "./components/AllToolsMenu";
-import ToolModal from "./components/ToolModal";
+import ToolPage from "./components/ToolPage";
 import "./App.css";
 
 const THEME_KEY = "strip-theme";
@@ -14,7 +15,8 @@ export default function App() {
     if (typeof window === "undefined") return "dark";
     return localStorage.getItem(THEME_KEY) || "dark";
   });
-  const [activeTool, setActiveTool] = useState(null);
+  const [path, navigate] = usePath();
+  const activeToolId = toolIdFromPath(path);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -47,15 +49,17 @@ export default function App() {
       t.subtitleStreams.some((s) => s.status === "extracting")
   );
 
+  const goHome = () => navigate("/");
+
   return (
     <>
       <div className="grain" />
       <header className="nav">
-        <div className="nav__mark">
+        <button type="button" className="nav__mark nav__mark--link" onClick={goHome}>
           <span className="nav__dot" />
           STRIP
-        </div>
-        <AllToolsMenu onSelectTool={setActiveTool} />
+        </button>
+        <AllToolsMenu onSelectTool={(id) => navigate(toolPathFor(id))} />
         <div className="nav__right">
           <a
             className="nav__link"
@@ -77,52 +81,56 @@ export default function App() {
         </div>
       </header>
 
-      <main className="shell">
-        <section className="hero">
-          <p className="eyebrow">client-side media console</p>
-          <h1 className="hero__title">
-            Pull the sound.
-            <br />
-            Pull the words.
-          </h1>
-          <p className="hero__sub">
-            Drop in one or many videos and Strip lists every audio and subtitle track it finds —
-            pull one out at a time, or grab everything of a kind at once as a zip. Everything runs
-            in this browser tab, so nothing ever leaves your machine.
-          </p>
-          <Meter active={anyBusy} />
-        </section>
-
-        {engineState === "error" && <p className="engine-error">{engineError}</p>}
-
-        <Dropzone onFiles={addFiles} engineState={engineState} />
-
-        {tracks.length > 0 && (
-          <section className="queue">
-            <div className="queue__header">
-              <span>queue</span>
-              <span>{tracks.length} file{tracks.length > 1 ? "s" : ""}</span>
-            </div>
-            {tracks.map((t, i) => (
-              <TrackCard
-                key={t.id}
-                track={t}
-                index={i}
-                onSetFormat={setAudioFormat}
-                onExtractOneAudio={extractOneAudio}
-                onDownloadOneAudio={downloadOneAudio}
-                onExtractOneSubtitle={extractOneSubtitle}
-                onDownloadOneSubtitle={downloadOneSubtitle}
-                onExtractAllAudio={extractAllAudio}
-                onDownloadAllAudio={downloadAllAudio}
-                onExtractAllSubtitles={extractAllSubtitles}
-                onDownloadAllSubtitles={downloadAllSubtitles}
-                onRemove={removeTrack}
-              />
-            ))}
+      {activeToolId ? (
+        <ToolPage key={activeToolId} toolId={activeToolId} onHome={goHome} />
+      ) : (
+        <main className="shell">
+          <section className="hero">
+            <p className="eyebrow">client-side media console</p>
+            <h1 className="hero__title">
+              Pull the sound.
+              <br />
+              Pull the words.
+            </h1>
+            <p className="hero__sub">
+              Drop in one or many videos and Strip lists every audio and subtitle track it finds —
+              pull one out at a time, or grab everything of a kind at once as a zip. Everything runs
+              in this browser tab, so nothing ever leaves your machine.
+            </p>
+            <Meter active={anyBusy} />
           </section>
-        )}
-      </main>
+
+          {engineState === "error" && <p className="engine-error">{engineError}</p>}
+
+          <Dropzone onFiles={addFiles} engineState={engineState} />
+
+          {tracks.length > 0 && (
+            <section className="queue">
+              <div className="queue__header">
+                <span>queue</span>
+                <span>{tracks.length} file{tracks.length > 1 ? "s" : ""}</span>
+              </div>
+              {tracks.map((t, i) => (
+                <TrackCard
+                  key={t.id}
+                  track={t}
+                  index={i}
+                  onSetFormat={setAudioFormat}
+                  onExtractOneAudio={extractOneAudio}
+                  onDownloadOneAudio={downloadOneAudio}
+                  onExtractOneSubtitle={extractOneSubtitle}
+                  onDownloadOneSubtitle={downloadOneSubtitle}
+                  onExtractAllAudio={extractAllAudio}
+                  onDownloadAllAudio={downloadAllAudio}
+                  onExtractAllSubtitles={extractAllSubtitles}
+                  onDownloadAllSubtitles={downloadAllSubtitles}
+                  onRemove={removeTrack}
+                />
+              ))}
+            </section>
+          )}
+        </main>
+      )}
 
       <footer className="footer">
         <p>
@@ -130,8 +138,6 @@ export default function App() {
           tab. Large files may take a while and use real memory.
         </p>
       </footer>
-
-      <ToolModal key={activeTool} toolId={activeTool} onClose={() => setActiveTool(null)} />
     </>
   );
 }
