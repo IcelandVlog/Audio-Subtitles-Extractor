@@ -1,57 +1,73 @@
 import { useEffect, useState } from "react";
-import { useTrackQueue } from "./lib/useTrackQueue";
-import Meter from "./components/Meter";
-import Dropzone from "./components/Dropzone";
-import TrackCard from "./components/TrackCard";
+import AllToolsMenu from "./components/AllToolsMenu";
+import { useHashRoute } from "./lib/useHashRoute";
+import { ALL_TOOLS } from "./lib/toolsRegistry";
+import Home from "./pages/Home";
+import ConvertToSrt from "./pages/ConvertToSrt";
+import ConvertToVtt from "./pages/ConvertToVtt";
+import SupToSrt from "./pages/SupToSrt";
+import SubIdxToSrt from "./pages/SubIdxToSrt";
+import ConvertToText from "./pages/ConvertToText";
+import ConvertToPdf from "./pages/ConvertToPdf";
+import SubtitleShifter from "./pages/SubtitleShifter";
+import PartialSubtitleShifter from "./pages/PartialSubtitleShifter";
+import SrtCleaner from "./pages/SrtCleaner";
+import ConvertToUtf8 from "./pages/ConvertToUtf8";
+import SubtitleMerger from "./pages/SubtitleMerger";
+import TimedLyricsEditor from "./pages/TimedLyricsEditor";
+import ColorChanger from "./pages/ColorChanger";
+import PositionChanger from "./pages/PositionChanger";
+import PinyinSubtitles from "./pages/PinyinSubtitles";
 import "./App.css";
 
 const THEME_KEY = "strip-theme";
+
+const ROUTES = {
+  "to-srt": ConvertToSrt,
+  "to-vtt": ConvertToVtt,
+  "sup-to-srt": SupToSrt,
+  "subidx-to-srt": SubIdxToSrt,
+  "to-text": ConvertToText,
+  "to-pdf": ConvertToPdf,
+  shifter: SubtitleShifter,
+  "partial-shifter": PartialSubtitleShifter,
+  cleaner: SrtCleaner,
+  "to-utf8": ConvertToUtf8,
+  merger: SubtitleMerger,
+  "lyrics-editor": TimedLyricsEditor,
+  "color-changer": ColorChanger,
+  "position-changer": PositionChanger,
+  pinyin: PinyinSubtitles,
+};
 
 export default function App() {
   const [theme, setTheme] = useState(() => {
     if (typeof window === "undefined") return "dark";
     return localStorage.getItem(THEME_KEY) || "dark";
   });
+  const route = useHashRoute();
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem(THEME_KEY, theme);
   }, [theme]);
 
-  const {
-    tracks,
-    engineState,
-    engineError,
-    addFiles,
-    setAudioFormat,
-    removeTrack,
-    extractOneAudio,
-    extractOneSubtitle,
-    downloadOneAudio,
-    downloadOneSubtitle,
-    extractAllAudio,
-    extractAllSubtitles,
-    downloadAllAudio,
-    downloadAllSubtitles,
-  } = useTrackQueue();
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [route]);
 
-  const anyBusy = tracks.some(
-    (t) =>
-      t.status === "probing" ||
-      t.audioAllStatus === "extracting" ||
-      t.subsAllStatus === "extracting" ||
-      t.audioStreams.some((s) => s.status === "extracting") ||
-      t.subtitleStreams.some((s) => s.status === "extracting")
-  );
+  const ToolPage = ROUTES[route];
+  const activeTool = ALL_TOOLS.find((t) => t.route === route);
 
   return (
     <>
       <div className="grain" />
       <header className="nav">
-        <div className="nav__mark">
+        <a className="nav__mark" href="#/">
           <span className="nav__dot" />
           STRIP
-        </div>
+        </a>
+        <AllToolsMenu />
         <div className="nav__right">
           <a
             className="nav__link"
@@ -74,50 +90,7 @@ export default function App() {
       </header>
 
       <main className="shell">
-        <section className="hero">
-          <p className="eyebrow">client-side media console</p>
-          <h1 className="hero__title">
-            Pull the sound.
-            <br />
-            Pull the words.
-          </h1>
-          <p className="hero__sub">
-            Drop in one or many videos and Strip lists every audio and subtitle track it finds —
-            pull one out at a time, or grab everything of a kind at once as a zip. Everything runs
-            in this browser tab, so nothing ever leaves your machine.
-          </p>
-          <Meter active={anyBusy} />
-        </section>
-
-        {engineState === "error" && <p className="engine-error">{engineError}</p>}
-
-        <Dropzone onFiles={addFiles} engineState={engineState} />
-
-        {tracks.length > 0 && (
-          <section className="queue">
-            <div className="queue__header">
-              <span>queue</span>
-              <span>{tracks.length} file{tracks.length > 1 ? "s" : ""}</span>
-            </div>
-            {tracks.map((t, i) => (
-              <TrackCard
-                key={t.id}
-                track={t}
-                index={i}
-                onSetFormat={setAudioFormat}
-                onExtractOneAudio={extractOneAudio}
-                onDownloadOneAudio={downloadOneAudio}
-                onExtractOneSubtitle={extractOneSubtitle}
-                onDownloadOneSubtitle={downloadOneSubtitle}
-                onExtractAllAudio={extractAllAudio}
-                onDownloadAllAudio={downloadAllAudio}
-                onExtractAllSubtitles={extractAllSubtitles}
-                onDownloadAllSubtitles={downloadAllSubtitles}
-                onRemove={removeTrack}
-              />
-            ))}
-          </section>
-        )}
+        {ToolPage ? <ToolPage key={activeTool?.id || route} /> : <Home />}
       </main>
 
       <footer className="footer">
