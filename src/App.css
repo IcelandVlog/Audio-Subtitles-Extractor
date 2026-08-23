@@ -660,9 +660,10 @@
 }
 
 .all-tools__panel {
-  position: absolute;
-  top: calc(100% + 10px);
-  left: 0;
+  position: fixed;
+  top: 76px;
+  left: 50%;
+  transform: translateX(-50%);
   /* device-relative by default: scales with the actual viewport, not a fixed px box */
   width: min(320px, 88vw);
   max-height: min(70dvh, 70vh);
