@@ -109,7 +109,10 @@ export function parseVtt(text) {
 
 export function toVttText(cues) {
   const body = cues
-    .map((c) => `${msToVttTime(c.start)} --> ${msToVttTime(c.end)}\n${c.text}`)
+    .map(
+      (c) =>
+        `${msToVttTime(c.start)} --> ${msToVttTime(c.end)}${c.settings ? " " + c.settings : ""}\n${c.text}`
+    )
     .join("\n\n");
   return `WEBVTT\n\n${body}\n`;
 }

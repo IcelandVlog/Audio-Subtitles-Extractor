@@ -6,6 +6,7 @@ import Dropzone from "./components/Dropzone";
 import TrackCard from "./components/TrackCard";
 import AllToolsMenu from "./components/AllToolsMenu";
 import ToolPage from "./components/ToolPage";
+import LyricsEditor from "./components/LyricsEditor";
 import "./App.css";
 
 const THEME_KEY = "strip-theme";
@@ -59,7 +60,9 @@ export default function App() {
           <span className="nav__dot" />
           STRIP
         </button>
-        <AllToolsMenu onSelectTool={(id) => navigate(toolPathFor(id))} />
+        <AllToolsMenu
+          onSelectTool={(id) => navigate(id === "extract-subtitles-from-video" ? "/" : toolPathFor(id))}
+        />
         <div className="nav__right">
           <a
             className="nav__link"
@@ -81,7 +84,9 @@ export default function App() {
         </div>
       </header>
 
-      {activeToolId ? (
+      {activeToolId === "timed-lyrics-editor" ? (
+        <LyricsEditor onHome={goHome} />
+      ) : activeToolId ? (
         <ToolPage key={activeToolId} toolId={activeToolId} onHome={goHome} />
       ) : (
         <main className="shell">

@@ -11,6 +11,7 @@ import { cuesToPdfBlob } from "./pdf";
 import { parsePgs } from "./pgs";
 import { parseVobsub } from "./vobsub";
 import { ocrFramesToCues } from "./ocr";
+import { cuesToPinyin } from "./pinyin";
 
 const OCR_LANG_FIELD = {
   key: "lang",
@@ -243,6 +244,102 @@ export const TOOLS = {
       return download(`${baseName(fileA.name)}.merged.srt`, toSrtText(merged), "text/plain");
     },
   },
+
+  "color-changer": {
+    label: "Color changer",
+    category: "other",
+    accept: ".srt,.vtt,.ass,.ssa,.sbv",
+    fields: [{ key: "color", label: "Text color", type: "color", default: "#ffff00" }],
+    hint: "Wraps every line in a color tag. Works in players that render styled SRT/VTT (VLC, most web players).",
+    async run([file], options) {
+      const text = await readText(file);
+      const { cues, format } = parseAny(file.name, text);
+      const color = options.color || "#ffffff";
+      const colored = cues.map((c) => ({ ...c, text: `<font color="${color}">${c.text}</font>` }));
+      const isVtt = format === "vtt";
+      return download(
+        `${baseName(file.name)}.color.${isVtt ? "vtt" : "srt"}`,
+        isVtt ? toVttText(colored) : toSrtText(colored),
+        "text/plain"
+      );
+    },
+  },
+
+  "position-changer": {
+    label: "Position changer",
+    category: "other",
+    accept: ".srt,.vtt,.ass,.ssa,.sbv",
+    fields: [
+      {
+        key: "position",
+        label: "Position",
+        type: "select",
+        options: [
+          { value: "top", label: "Top" },
+          { value: "bottom", label: "Bottom (default)" },
+          { value: "left", label: "Left" },
+          { value: "right", label: "Right" },
+          { value: "center", label: "Center" },
+        ],
+        default: "bottom",
+      },
+    ],
+    hint: "Outputs a WebVTT file with position/line cue settings, honored by HTML5 video and most modern players.",
+    async run([file], options) {
+      const text = await readText(file);
+      const { cues } = parseAny(file.name, text);
+      const settings = POSITION_SETTINGS[options.position] || POSITION_SETTINGS.bottom;
+      const positioned = cues.map((c) => ({ ...c, settings }));
+      return download(`${baseName(file.name)}.positioned.vtt`, toVttText(positioned), "text/vtt");
+    },
+  },
+
+  "make-pinyin-subtitles": {
+    label: "Make Pinyin Subtitles",
+    category: "other",
+    accept: ".srt,.vtt,.ass,.ssa,.sbv",
+    fields: [
+      {
+        key: "mode",
+        label: "Output",
+        type: "select",
+        options: [
+          { value: "bilingual", label: "Chinese + Pinyin" },
+          { value: "pinyin", label: "Pinyin only" },
+        ],
+        default: "bilingual",
+      },
+      {
+        key: "tone",
+        label: "Tones",
+        type: "select",
+        options: [
+          { value: "marks", label: "Tone marks (nǐ hǎo)" },
+          { value: "numbers", label: "Tone numbers (ni3 hao3)" },
+          { value: "none", label: "No tones (ni hao)" },
+        ],
+        default: "marks",
+      },
+    ],
+    hint: "Converts Chinese subtitle text to Pinyin. Non-Chinese text and punctuation are left as-is.",
+    async run([file], options) {
+      const text = await readText(file);
+      const { cues } = parseAny(file.name, text);
+      const converted = cuesToPinyin(cues, {
+        mode: options.mode || "bilingual",
+        tone: options.tone || "marks",
+      });
+      return download(`${baseName(file.name)}.pinyin.srt`, toSrtText(converted), "text/plain");
+    },
+  },
+};
+
+const POSITION_SETTINGS = {
+  top: "line:10%,align:center",
+  bottom: "line:90%,align:center",
+  left: "position:10%,align:start",
+  right: "position:90%,align:end",
+  center: "position:50%,align:center,line:50%",
 };
 
 function extOf(filename) {

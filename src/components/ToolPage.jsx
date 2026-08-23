@@ -137,6 +137,13 @@ export default function ToolPage({ toolId, onHome }) {
                       </option>
                     ))}
                   </select>
+                ) : f.type === "color" ? (
+                  <input
+                    type="color"
+                    className="tool-modal__color"
+                    value={options[f.key]}
+                    onChange={(e) => setOptions((o) => ({ ...o, [f.key]: e.target.value }))}
+                  />
                 ) : (
                   <input
                     type="number"
