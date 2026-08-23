@@ -6,37 +6,44 @@ const CATEGORIES = [
     label: "CONVERTERS",
     icon: "⇄",
     items: [
-      "Convert to Srt",
-      "Convert to WebVtt",
-      "Sup to Srt Converter",
-      "Sub/Idx to Srt Converter",
-      "Convert to Plain Text",
-      "Convert to PDF",
+      { label: "Convert to Srt" },
+      { label: "Convert to WebVtt" },
+      { label: "Sup to Srt Converter" },
+      { label: "Sub/Idx to Srt Converter" },
+      { label: "Convert to Plain Text" },
+      { label: "Convert to PDF" },
     ],
   },
   {
     id: "syncing",
     label: "SYNCING",
-    icon: "↻",
-    items: ["Subtitle Shifter", "Partial Subtitle Shifter"],
+    icon: "◔",
+    items: [{ label: "Subtitle Shifter" }, { label: "Partial Subtitle Shifter" }],
   },
   {
     id: "fixing",
     label: "FIXING",
-    icon: "⧉",
-    items: ["Srt Cleaner", "Convert to UTF-8"],
+    icon: "⧈",
+    items: [{ label: "Srt Cleaner" }, { label: "Convert to UTF-8" }],
   },
   {
     id: "other",
     label: "OTHER",
     icon: "✦",
-    items: ["Subtitle Merger"],
+    items: [
+      { label: "Subtitle Merger" },
+      { label: "Extract Subtitles from Video", badge: "New!" },
+      { label: "Timed Lyrics Editor", badge: "New!" },
+      { label: "Color changer" },
+      { label: "Position changer" },
+      { label: "Make Pinyin Subtitles" },
+    ],
   },
 ];
 
 export default function AllToolsMenu() {
   const [menuOpen, setMenuOpen] = useState(false);
-  // every category starts open, matching the screenshot
+  // every category starts open on mobile, matching the earlier build
   const [openCats, setOpenCats] = useState(() =>
     Object.fromEntries(CATEGORIES.map((c) => [c.id, true]))
   );
@@ -88,31 +95,57 @@ export default function AllToolsMenu() {
 
       {menuOpen && (
         <div className="all-tools__panel" ref={menuRef} role="menu">
-          {CATEGORIES.map((cat) => {
-            const isOpen = !!openCats[cat.id];
-            return (
-              <div className="cat-group" key={cat.id}>
-                <button
-                  type="button"
-                  className={`cat-header ${isOpen ? "cat-header--open" : ""}`}
-                  aria-expanded={isOpen}
-                  onClick={() => toggleCategory(cat.id)}
-                >
-                  <span className="cat-header__label">
-                    <span className="cat-header__icon" aria-hidden="true">
-                      {cat.icon}
-                    </span>
-                    {cat.label}
-                  </span>
-                  <span className="cat-header__chev" aria-hidden="true">
-                    ⌄
-                  </span>
-                </button>
-
-                <CategoryItems open={isOpen} items={cat.items} />
+          {/* ---- desktop: static mega grid, all items always visible ---- */}
+          <div className="all-tools__mega">
+            {CATEGORIES.map((cat) => (
+              <div className="mega-col" key={cat.id}>
+                <div className="mega-icon" aria-hidden="true">
+                  {cat.icon}
+                </div>
+                <div className="mega-label">{cat.label}</div>
+                <div className="mega-items">
+                  {cat.items.map((item) => (
+                    <div className="mega-item" key={item.label} role="menuitem">
+                      <span className="mega-item__chev" aria-hidden="true">
+                        ›
+                      </span>
+                      {item.label}
+                      {item.badge && <span className="mega-badge">{item.badge}</span>}
+                    </div>
+                  ))}
+                </div>
               </div>
-            );
-          })}
+            ))}
+          </div>
+
+          {/* ---- mobile: collapsible accordion, unchanged from before ---- */}
+          <div className="all-tools__mobile">
+            {CATEGORIES.map((cat) => {
+              const isOpen = !!openCats[cat.id];
+              return (
+                <div className="cat-group" key={cat.id}>
+                  <button
+                    type="button"
+                    className={`cat-header ${isOpen ? "cat-header--open" : ""}`}
+                    aria-expanded={isOpen}
+                    onClick={() => toggleCategory(cat.id)}
+                  >
+                    <span className="cat-header__label">
+                      <span className="cat-header__icon" aria-hidden="true">
+                        {cat.icon}
+                      </span>
+                      {cat.label}
+                    </span>
+                    <span className="cat-header__chev" aria-hidden="true">
+                      ⌄
+                    </span>
+                  </button>
+
+                  <CategoryItems open={isOpen} items={cat.items} />
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
@@ -142,14 +175,12 @@ function CategoryItems({ open, items }) {
   }, [open]);
 
   return (
-    <div
-      className={`cat-items ${open ? "cat-items--open" : ""}`}
-      style={{ maxHeight }}
-    >
+    <div className={`cat-items ${open ? "cat-items--open" : ""}`} style={{ maxHeight }}>
       <div ref={innerRef}>
         {items.map((item) => (
-          <div className="cat-items__item" key={item} role="menuitem">
-            <span aria-hidden="true">›</span> {item}
+          <div className="cat-items__item" key={item.label} role="menuitem">
+            <span aria-hidden="true">›</span> {item.label}
+            {item.badge && <span className="mega-badge mega-badge--mobile">{item.badge}</span>}
           </div>
         ))}
       </div>
