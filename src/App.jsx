@@ -4,6 +4,7 @@ import Meter from "./components/Meter";
 import Dropzone from "./components/Dropzone";
 import TrackCard from "./components/TrackCard";
 import AllToolsMenu from "./components/AllToolsMenu";
+import ToolModal from "./components/ToolModal";
 import "./App.css";
 
 const THEME_KEY = "strip-theme";
@@ -13,6 +14,7 @@ export default function App() {
     if (typeof window === "undefined") return "dark";
     return localStorage.getItem(THEME_KEY) || "dark";
   });
+  const [activeTool, setActiveTool] = useState(null);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -53,7 +55,7 @@ export default function App() {
           <span className="nav__dot" />
           STRIP
         </div>
-        <AllToolsMenu />
+        <AllToolsMenu onSelectTool={setActiveTool} />
         <div className="nav__right">
           <a
             className="nav__link"
@@ -128,6 +130,8 @@ export default function App() {
           tab. Large files may take a while and use real memory.
         </p>
       </footer>
+
+      <ToolModal key={activeTool} toolId={activeTool} onClose={() => setActiveTool(null)} />
     </>
   );
 }

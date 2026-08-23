@@ -6,35 +6,41 @@ const CATEGORIES = [
     label: "CONVERTERS",
     icon: "⇄",
     items: [
-      "Convert to Srt",
-      "Convert to WebVtt",
-      "Sup to Srt Converter",
-      "Sub/Idx to Srt Converter",
-      "Convert to Plain Text",
-      "Convert to PDF",
+      { id: "convert-to-srt", label: "Convert to Srt" },
+      { id: "convert-to-webvtt", label: "Convert to WebVtt" },
+      { id: "sup-to-srt", label: "Sup to Srt Converter" },
+      { id: "subidx-to-srt", label: "Sub/Idx to Srt Converter" },
+      { id: "convert-to-plaintext", label: "Convert to Plain Text" },
+      { id: "convert-to-pdf", label: "Convert to PDF" },
     ],
   },
   {
     id: "syncing",
     label: "SYNCING",
     icon: "↻",
-    items: ["Subtitle Shifter", "Partial Subtitle Shifter"],
+    items: [
+      { id: "subtitle-shifter", label: "Subtitle Shifter" },
+      { id: "partial-subtitle-shifter", label: "Partial Subtitle Shifter" },
+    ],
   },
   {
     id: "fixing",
     label: "FIXING",
     icon: "⧉",
-    items: ["Srt Cleaner", "Convert to UTF-8"],
+    items: [
+      { id: "srt-cleaner", label: "Srt Cleaner" },
+      { id: "convert-to-utf8", label: "Convert to UTF-8" },
+    ],
   },
   {
     id: "other",
     label: "OTHER",
     icon: "✦",
-    items: ["Subtitle Merger"],
+    items: [{ id: "subtitle-merger", label: "Subtitle Merger" }],
   },
 ];
 
-export default function AllToolsMenu() {
+export default function AllToolsMenu({ onSelectTool }) {
   const [menuOpen, setMenuOpen] = useState(false);
   // every category starts open, matching the screenshot
   const [openCats, setOpenCats] = useState(() =>
@@ -73,6 +79,11 @@ export default function AllToolsMenu() {
     };
   }, [menuOpen]);
 
+  const handleItemClick = (id) => {
+    setMenuOpen(false);
+    onSelectTool?.(id);
+  };
+
   return (
     <div className="all-tools">
       <button
@@ -109,7 +120,7 @@ export default function AllToolsMenu() {
                   </span>
                 </button>
 
-                <CategoryItems open={isOpen} items={cat.items} />
+                <CategoryItems open={isOpen} items={cat.items} onSelect={handleItemClick} />
               </div>
             );
           })}
@@ -119,7 +130,7 @@ export default function AllToolsMenu() {
   );
 }
 
-function CategoryItems({ open, items }) {
+function CategoryItems({ open, items, onSelect }) {
   const innerRef = useRef(null);
   const [maxHeight, setMaxHeight] = useState(open ? "none" : "0px");
 
@@ -148,8 +159,17 @@ function CategoryItems({ open, items }) {
     >
       <div ref={innerRef}>
         {items.map((item) => (
-          <div className="cat-items__item" key={item} role="menuitem">
-            <span aria-hidden="true">›</span> {item}
+          <div
+            className="cat-items__item"
+            key={item.id}
+            role="menuitem"
+            tabIndex={0}
+            onClick={() => onSelect(item.id)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") onSelect(item.id);
+            }}
+          >
+            <span aria-hidden="true">›</span> {item.label}
           </div>
         ))}
       </div>

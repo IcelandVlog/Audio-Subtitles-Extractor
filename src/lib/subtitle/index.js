@@ -1,0 +1,258 @@
+import { parseAny, toSrtText, toVttText } from "./formats";
+import {
+  cuesToPlainText,
+  shiftCues,
+  partialShiftCues,
+  cleanCues,
+  mergeCues,
+  bytesToUtf8Text,
+} from "./tools";
+import { cuesToPdfBlob } from "./pdf";
+import { parsePgs } from "./pgs";
+import { parseVobsub } from "./vobsub";
+import { ocrFramesToCues } from "./ocr";
+
+const OCR_LANG_FIELD = {
+  key: "lang",
+  label: "Subtitle language",
+  type: "select",
+  options: [
+    { value: "eng", label: "English" },
+    { value: "spa", label: "Spanish" },
+    { value: "fra", label: "French" },
+    { value: "deu", label: "German" },
+    { value: "por", label: "Portuguese" },
+    { value: "ben", label: "Bengali" },
+    { value: "hin", label: "Hindi" },
+    { value: "ara", label: "Arabic" },
+    { value: "rus", label: "Russian" },
+    { value: "jpn", label: "Japanese" },
+    { value: "kor", label: "Korean" },
+    { value: "chi_sim", label: "Chinese (Simplified)" },
+  ],
+  default: "eng",
+};
+
+function baseName(filename) {
+  return filename.replace(/\.[^.]+$/, "");
+}
+function download(filename, content, mime) {
+  return { filename, blob: content instanceof Blob ? content : new Blob([content], { type: mime }) };
+}
+async function readText(file) {
+  return bytesToUtf8Text(await file.arrayBuffer());
+}
+
+export const TOOLS = {
+  "convert-to-srt": {
+    label: "Convert to Srt",
+    category: "converters",
+    accept: ".vtt,.ass,.ssa,.sbv,.srt",
+    fields: [],
+    hint: "Upload a .vtt, .ass/.ssa, or .sbv file — it'll come back as .srt.",
+    async run([file]) {
+      const text = await readText(file);
+      const { cues } = parseAny(file.name, text);
+      return download(`${baseName(file.name)}.srt`, toSrtText(cues), "text/plain");
+    },
+  },
+
+  "convert-to-webvtt": {
+    label: "Convert to WebVtt",
+    category: "converters",
+    accept: ".srt,.ass,.ssa,.sbv,.vtt",
+    fields: [],
+    hint: "Upload a .srt, .ass/.ssa, or .sbv file — it'll come back as .vtt.",
+    async run([file]) {
+      const text = await readText(file);
+      const { cues } = parseAny(file.name, text);
+      return download(`${baseName(file.name)}.vtt`, toVttText(cues), "text/vtt");
+    },
+  },
+
+  "sup-to-srt": {
+    label: "Sup to Srt Converter",
+    category: "converters",
+    accept: ".sup",
+    fields: [OCR_LANG_FIELD],
+    beta: true,
+    hint: "PGS/Blu-ray bitmap subtitles (.sup). Runs OCR in your browser — larger files take a while, and accuracy depends on image quality.",
+    async run([file], options, onProgress) {
+      const buf = await file.arrayBuffer();
+      const frames = await parsePgs(buf);
+      const cues = await ocrFramesToCues(frames, {
+        lang: options.lang || "eng",
+        onProgress,
+      });
+      return download(`${baseName(file.name)}.srt`, toSrtText(cues), "text/plain");
+    },
+  },
+
+  "subidx-to-srt": {
+    label: "Sub/Idx to Srt Converter",
+    category: "converters",
+    accept: ".idx,.sub",
+    needsPair: true,
+    fields: [OCR_LANG_FIELD],
+    beta: true,
+    hint: "DVD VobSub subtitles — upload both the .idx and the .sub file together. Runs OCR in your browser.",
+    async run(files, options, onProgress) {
+      const idxFile = files.find((f) => f.name.toLowerCase().endsWith(".idx"));
+      const subFile = files.find((f) => f.name.toLowerCase().endsWith(".sub"));
+      if (!idxFile || !subFile) {
+        throw new Error("Please add one .idx file and one .sub file.");
+      }
+      const idxText = await idxFile.text();
+      const subBuf = await subFile.arrayBuffer();
+      const frames = await parseVobsub(idxText, subBuf);
+      const cues = await ocrFramesToCues(frames, {
+        lang: options.lang || "eng",
+        onProgress,
+      });
+      return download(`${baseName(idxFile.name)}.srt`, toSrtText(cues), "text/plain");
+    },
+  },
+
+  "convert-to-plaintext": {
+    label: "Convert to Plain Text",
+    category: "converters",
+    accept: ".srt,.vtt,.ass,.ssa,.sbv",
+    fields: [],
+    hint: "Strips all timestamps and formatting, keeping just the dialogue.",
+    async run([file]) {
+      const text = await readText(file);
+      const { cues } = parseAny(file.name, text);
+      return download(`${baseName(file.name)}.txt`, cuesToPlainText(cues), "text/plain");
+    },
+  },
+
+  "convert-to-pdf": {
+    label: "Convert to PDF",
+    category: "converters",
+    accept: ".srt,.vtt,.ass,.ssa,.sbv",
+    fields: [],
+    hint: "A readable PDF with each line's timestamp and text.",
+    async run([file]) {
+      const text = await readText(file);
+      const { cues } = parseAny(file.name, text);
+      const blob = cuesToPdfBlob(cues, baseName(file.name));
+      return download(`${baseName(file.name)}.pdf`, blob, "application/pdf");
+    },
+  },
+
+  "subtitle-shifter": {
+    label: "Subtitle Shifter",
+    category: "syncing",
+    accept: ".srt,.vtt,.ass,.ssa,.sbv",
+    fields: [{ key: "offsetMs", label: "Shift by (ms, +/-)", type: "number", default: 0 }],
+    hint: "Positive numbers delay the subtitles, negative numbers bring them earlier.",
+    async run([file], options) {
+      const text = await readText(file);
+      const { cues, format } = parseAny(file.name, text);
+      const shifted = shiftCues(cues, Number(options.offsetMs) || 0);
+      const isVtt = format === "vtt";
+      return download(
+        `${baseName(file.name)}.${isVtt ? "vtt" : "srt"}`,
+        isVtt ? toVttText(shifted) : toSrtText(shifted),
+        "text/plain"
+      );
+    },
+  },
+
+  "partial-subtitle-shifter": {
+    label: "Partial Subtitle Shifter",
+    category: "syncing",
+    accept: ".srt,.vtt,.ass,.ssa,.sbv",
+    fields: [
+      { key: "offsetMs", label: "Shift by (ms, +/-)", type: "number", default: 0 },
+      { key: "fromIndex", label: "From cue #", type: "number", default: 1 },
+      { key: "toIndex", label: "To cue # (blank = last)", type: "number", default: "" },
+    ],
+    hint: "Only the cues in the range you pick get shifted; the rest stay put.",
+    async run([file], options) {
+      const text = await readText(file);
+      const { cues, format } = parseAny(file.name, text);
+      const shifted = partialShiftCues(
+        cues,
+        Number(options.offsetMs) || 0,
+        Number(options.fromIndex) || 1,
+        options.toIndex ? Number(options.toIndex) : cues.length
+      );
+      const isVtt = format === "vtt";
+      return download(
+        `${baseName(file.name)}.${isVtt ? "vtt" : "srt"}`,
+        isVtt ? toVttText(shifted) : toSrtText(shifted),
+        "text/plain"
+      );
+    },
+  },
+
+  "srt-cleaner": {
+    label: "Srt Cleaner",
+    category: "fixing",
+    accept: ".srt,.vtt,.ass,.ssa,.sbv",
+    fields: [],
+    hint: "Strips HTML/formatting tags, drops empty or junk lines, merges exact duplicate repeats.",
+    async run([file]) {
+      const text = await readText(file);
+      const { cues } = parseAny(file.name, text);
+      const cleaned = cleanCues(cues);
+      return download(`${baseName(file.name)}.cleaned.srt`, toSrtText(cleaned), "text/plain");
+    },
+  },
+
+  "convert-to-utf8": {
+    label: "Convert to UTF-8",
+    category: "fixing",
+    accept: ".srt,.vtt,.ass,.ssa,.sbv,.txt",
+    fields: [],
+    hint: "Auto-detects a legacy encoding (Windows-1252, GB18030, etc.) and re-saves the file as UTF-8.",
+    async run([file]) {
+      const buf = await file.arrayBuffer();
+      const text = bytesToUtf8Text(buf);
+      return download(`${baseName(file.name)}.utf8${extOf(file.name)}`, text, "text/plain;charset=utf-8");
+    },
+  },
+
+  "subtitle-merger": {
+    label: "Subtitle Merger",
+    category: "other",
+    accept: ".srt,.vtt,.ass,.ssa,.sbv",
+    needsPair: true,
+    fields: [
+      {
+        key: "mode",
+        label: "Merge mode",
+        type: "select",
+        options: [
+          { value: "dual", label: "Dual subtitles (both languages together)" },
+          { value: "sequential", label: "Sequential (file B plays after file A)" },
+        ],
+        default: "dual",
+      },
+      { key: "gapMs", label: "Gap between files, sequential mode (ms)", type: "number", default: 1000 },
+    ],
+    hint: "Upload two subtitle files to combine into one.",
+    async run(files, options) {
+      const [fileA, fileB] = files;
+      if (!fileA || !fileB) throw new Error("Please add two subtitle files.");
+      const [textA, textB] = await Promise.all([readText(fileA), readText(fileB)]);
+      const cuesA = parseAny(fileA.name, textA).cues;
+      const cuesB = parseAny(fileB.name, textB).cues;
+      const merged = mergeCues(cuesA, cuesB, options.mode || "dual", Number(options.gapMs) || 1000);
+      return download(`${baseName(fileA.name)}.merged.srt`, toSrtText(merged), "text/plain");
+    },
+  },
+};
+
+function extOf(filename) {
+  const m = filename.match(/\.[^.]+$/);
+  return m ? m[0] : ".txt";
+}
+
+export const CATEGORY_LABELS = {
+  converters: "CONVERTERS",
+  syncing: "SYNCING",
+  fixing: "FIXING",
+  other: "OTHER",
+};
