@@ -36,7 +36,14 @@ const CATEGORIES = [
     id: "other",
     label: "OTHER",
     icon: "✦",
-    items: [{ id: "subtitle-merger", label: "Subtitle Merger" }],
+    items: [
+      { id: "subtitle-merger", label: "Subtitle Merger" },
+      { id: "extract-subtitles-from-video", label: "Extract Subtitles from Video", badge: "New!" },
+      { id: "timed-lyrics-editor", label: "Timed Lyrics Editor", badge: "New!" },
+      { id: "color-changer", label: "Color changer" },
+      { id: "position-changer", label: "Position changer" },
+      { id: "make-pinyin-subtitles", label: "Make Pinyin Subtitles" },
+    ],
   },
 ];
 
@@ -170,6 +177,7 @@ function CategoryItems({ open, items, onSelect }) {
             }}
           >
             <span aria-hidden="true">›</span> {item.label}
+            {item.badge && <span className="cat-items__badge">{item.badge}</span>}
           </div>
         ))}
       </div>

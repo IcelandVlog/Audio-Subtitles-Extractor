@@ -767,6 +767,20 @@
   color: var(--phosphor);
 }
 
+.all-tools .cat-items__badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--bg);
+  background: var(--phosphor);
+  border-radius: 999px;
+  vertical-align: 2px;
+}
+
 /* Small devices (phones): box hugs the real viewport instead of a fixed px size,
    so it sizes itself to whatever screen it's opened on. */
 @media (max-width: 600px) {
@@ -784,34 +798,62 @@
   }
 }
 
-/* Large / desktop devices: clicking "All tools" opens a noticeably bigger box,
-   with room to lay items out in two columns so the extra width isn't wasted. */
+/* Large / desktop devices: "All tools" opens a wide mega-menu — every category
+   is its own static column, all shown open at once, no accordion behavior. */
 @media (min-width: 900px) {
   .all-tools__panel {
-    width: min(46vw, 620px);
-    max-height: min(78vh, 640px);
-    padding: 10px 8px;
+    width: min(84vw, 980px);
+    max-height: none;
+    overflow: visible;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    column-gap: 36px;
+    padding: 28px 32px;
+  }
+
+  .all-tools .cat-group + .cat-group {
+    border-top: none;
   }
 
   .all-tools .cat-header {
-    padding: 14px 14px;
-    font-size: 13px;
+    padding: 0 0 14px;
+    cursor: default;
+    pointer-events: none;
+  }
+
+  .all-tools .cat-header:hover,
+  .all-tools .cat-header--open {
+    color: var(--text-faint);
   }
 
   .all-tools .cat-header__icon {
-    font-size: 15px;
+    display: none;
+  }
+
+  .all-tools .cat-header__chev {
+    display: none;
+  }
+
+  /* items are always fully shown, regardless of collapsed state */
+  .all-tools .cat-items {
+    max-height: none !important;
+    overflow: visible;
+    transition: none;
   }
 
   .all-tools .cat-items__item {
-    font-size: 15px;
-    padding: 10px 14px 10px 30px;
+    font-size: 14.5px;
+    padding: 8px 6px 8px 4px;
+    white-space: nowrap;
   }
+}
 
-  /* two-column item grid on wide screens */
-  .all-tools .cat-items > div {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    column-gap: 6px;
+/* Extra-wide screens: give the mega-menu a little more breathing room. */
+@media (min-width: 1280px) {
+  .all-tools__panel {
+    width: min(70vw, 1080px);
+    column-gap: 48px;
+    padding: 32px 40px;
   }
 }
 
