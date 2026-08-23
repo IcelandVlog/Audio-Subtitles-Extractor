@@ -802,9 +802,14 @@
    is its own static column, all shown open at once, no accordion behavior. */
 @media (min-width: 900px) {
   .all-tools__panel {
+    position: fixed;
+    top: 76px;
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
     width: min(84vw, 980px);
-    max-height: none;
-    overflow: visible;
+    max-height: calc(100vh - 100px);
+    overflow-y: auto;
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     column-gap: 36px;
