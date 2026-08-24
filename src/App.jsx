@@ -74,13 +74,14 @@ export default function App() {
             target="_blank"
             rel="noreferrer"
           >
-            Subtitle Translate
+            Subtitle Translator
           </a>
         </div>
         <div className="nav__right">
           <a
             className="nav__link"
-            href="https://github.com/Bisalkumar/Audio-Extractor"
+            href="https://github.com/IcelandVlog/Audio-Subtitles-Extractor"
+            // href="https://github.com/Bisalkumar/Audio-Extractor"
             target="_blank"
             rel="noreferrer"
           >
