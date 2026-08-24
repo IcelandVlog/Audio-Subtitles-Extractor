@@ -13,24 +13,40 @@ const MODEL_BY_QUALITY = {
 const transcriberCache = {};
 
 /** Lazily create (and cache) the Whisper pipeline for a given quality tier. */
-function getTranscriber(quality, onModelProgress) {
+async function getTranscriber(quality, onModelProgress) {
   const modelId = MODEL_BY_QUALITY[quality] || MODEL_BY_QUALITY.fast;
   if (transcriberCache[modelId]) return transcriberCache[modelId];
 
-  const p = pipeline("automatic-speech-recognition", modelId, {
-    dtype: "q8",
-    progress_callback: (data) => {
-      if (onModelProgress && data.status === "progress" && data.total) {
-        onModelProgress(Math.min(1, data.loaded / data.total));
-      }
-    },
-  }).catch((err) => {
+  const makeProgressHandler = () => (data) => {
+    if (onModelProgress && data.status === "progress" && data.total) {
+      onModelProgress(Math.min(1, data.loaded / data.total));
+    }
+  };
+
+  const loadPromise = (async () => {
+    try {
+      // Let the library pick the right dtype per sub-model (encoder/decoder)
+      // automatically — forcing one dtype string across every component can
+      // pair mismatched quantized weights and scale files on some models.
+      return await pipeline("automatic-speech-recognition", modelId, {
+        progress_callback: makeProgressHandler(),
+      });
+    } catch {
+      // Fallback: full precision, no quantization at all — slower/bigger
+      // download, but avoids any quantization-format incompatibility.
+      onModelProgress?.(0);
+      return await pipeline("automatic-speech-recognition", modelId, {
+        dtype: "fp32",
+        progress_callback: makeProgressHandler(),
+      });
+    }
+  })().catch((err) => {
     delete transcriberCache[modelId];
     throw err;
   });
 
-  transcriberCache[modelId] = p;
-  return p;
+  transcriberCache[modelId] = loadPromise;
+  return loadPromise;
 }
 
 /** Decodes an audio Blob to mono Float32 samples at 16kHz — the format Whisper expects. */
