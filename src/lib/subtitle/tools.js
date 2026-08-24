@@ -94,6 +94,21 @@ export function mergeCues(cuesA, cuesB, mode = "dual", gapMs = 1000) {
   return merged.sort((a, b) => a.start - b.start);
 }
 
+// Concatenate any number of cue tracks in order, each starting `gapMs` after
+// the previous one ends. Generalizes mergeCues(..., "sequential") to N files —
+// for exactly two tracks the result is identical to the two-file version.
+export function mergeCuesSequential(cuesList, gapMs = 1000) {
+  const merged = [];
+  let offset = 0;
+  for (const cues of cuesList) {
+    const shifted = cues.map((c) => ({ ...c, start: c.start + offset, end: c.end + offset }));
+    merged.push(...shifted);
+    const lastEnd = shifted.length ? shifted[shifted.length - 1].end : offset;
+    offset = lastEnd + gapMs;
+  }
+  return merged;
+}
+
 // Best-effort re-encode to UTF-8 for subtitle files saved in a legacy charset.
 const FALLBACK_ENCODINGS = [
   "windows-1252",

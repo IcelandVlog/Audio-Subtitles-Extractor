@@ -24,18 +24,49 @@ export default function ToolPage({ toolId, onHome }) {
   }
 
   const needsPair = !!tool.needsPair;
-  const maxFiles = needsPair ? 2 : 1;
-  const canRun = files.length === maxFiles && status !== "running";
+  const isMulti = !!tool.multiFile;
+  const maxFiles = isMulti ? tool.maxFiles || 20 : needsPair ? 2 : 1;
+  const minFiles = isMulti ? tool.minFiles || 2 : maxFiles;
+  const canRun = files.length >= minFiles && files.length <= maxFiles && status !== "running";
+  const note = isMulti && tool.noteFor ? tool.noteFor(files, options) : null;
 
   const handleFiles = (fileList) => {
-    const picked = Array.from(fileList).slice(0, maxFiles);
+    const picked = Array.from(fileList);
     setFiles((prev) => {
-      const combined = needsPair ? [...prev, ...picked].slice(-maxFiles) : picked;
-      return combined;
+      if (isMulti) {
+        const combined = [...prev, ...picked];
+        const seen = new Set();
+        const deduped = combined.filter((f) => {
+          const key = `${f.name}:${f.size}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        return deduped.slice(0, maxFiles);
+      }
+      if (needsPair) return [...prev, ...picked].slice(-maxFiles);
+      return picked.slice(0, maxFiles);
     });
     setStatus("idle");
     setResult(null);
     setError("");
+  };
+
+  const removeFile = (index) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+    setStatus("idle");
+    setResult(null);
+    setError("");
+  };
+
+  const moveFile = (index, dir) => {
+    setFiles((prev) => {
+      const target = index + dir;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
   };
 
   const handleRun = async () => {
@@ -85,6 +116,7 @@ export default function ToolPage({ toolId, onHome }) {
           {tool.beta && <span className="tool-modal__beta">beta</span>}
         </h1>
         {tool.hint && <p className="tool-page__hint">{tool.hint}</p>}
+        {note && <p className="tool-page__hint tool-page__hint--warn">{note}</p>}
 
         <div
           className="tool-modal__drop tool-page__drop"
@@ -102,15 +134,52 @@ export default function ToolPage({ toolId, onHome }) {
             type="file"
             hidden
             accept={tool.accept}
-            multiple={needsPair}
+            multiple={needsPair || isMulti}
             onChange={(e) => e.target.files?.length && handleFiles(e.target.files)}
           />
           {files.length === 0 ? (
             <p>
-              Drop {needsPair ? "files" : "a file"} here or click to browse
+              Drop {needsPair || isMulti ? "files" : "a file"} here or click to browse
               <br />
               <span className="tool-modal__accept">{tool.accept.replaceAll(",", ", ")}</span>
             </p>
+          ) : isMulti ? (
+            <div className="tool-modal__filelist tool-modal__filelist--multi" onClick={(e) => e.stopPropagation()}>
+              <p className="tool-modal__filecount">
+                {files.length} of {minFiles}–{maxFiles} files added
+              </p>
+              <ul>
+                {files.map((f, i) => (
+                  <li key={`${f.name}-${f.size}-${i}`}>
+                    <span className="tool-modal__fileorder">{i + 1}</span>
+                    <span className="tool-modal__filename" title={f.name}>
+                      {f.name}
+                    </span>
+                    <span className="tool-modal__filebtns">
+                      <button type="button" disabled={i === 0} onClick={() => moveFile(i, -1)} aria-label="Move up">
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        disabled={i === files.length - 1}
+                        onClick={() => moveFile(i, 1)}
+                        aria-label="Move down"
+                      >
+                        ↓
+                      </button>
+                      <button type="button" onClick={() => removeFile(i)} aria-label="Remove file">
+                        ✕
+                      </button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {files.length < maxFiles && (
+                <button type="button" className="tool-modal__addmore" onClick={() => inputRef.current?.click()}>
+                  + add more files
+                </button>
+              )}
+            </div>
           ) : (
             <ul className="tool-modal__filelist">
               {files.map((f) => (

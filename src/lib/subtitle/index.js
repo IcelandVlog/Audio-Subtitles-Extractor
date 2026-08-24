@@ -5,6 +5,7 @@ import {
   partialShiftCues,
   cleanCues,
   mergeCues,
+  mergeCuesSequential,
   bytesToUtf8Text,
 } from "./tools";
 import { cuesToPdfBlob } from "./pdf";
@@ -219,29 +220,40 @@ export const TOOLS = {
     label: "Subtitle Merger",
     category: "other",
     accept: ".srt,.vtt,.ass,.ssa,.sbv",
-    needsPair: true,
+    multiFile: true,
+    minFiles: 2,
+    maxFiles: 20,
     fields: [
       {
         key: "mode",
         label: "Merge mode",
         type: "select",
         options: [
-          { value: "dual", label: "Dual subtitles (both languages together)" },
-          { value: "sequential", label: "Sequential (file B plays after file A)" },
+          { value: "sequential", label: "Sequential (files play one after another, in order)" },
+          { value: "dual", label: "Dual subtitles (only works with exactly 2 files)" },
         ],
-        default: "dual",
+        default: "sequential",
       },
-      { key: "gapMs", label: "Gap between files, sequential mode (ms)", type: "number", default: 1000 },
+      { key: "gapMs", label: "Gap between files (ms)", type: "number", default: 1000 },
     ],
-    hint: "Upload two subtitle files to combine into one.",
+    hint: "Add 2 to 20 subtitle files. Sequential mode plays them back to back, in the order listed below — drag them into place with the ↑/↓ buttons.",
+    noteFor(files, options) {
+      if (files.length > 2 && options.mode === "dual") {
+        return `Dual mode only works with exactly 2 files — merging these ${files.length} files sequentially instead.`;
+      }
+      return null;
+    },
     async run(files, options) {
-      const [fileA, fileB] = files;
-      if (!fileA || !fileB) throw new Error("Please add two subtitle files.");
-      const [textA, textB] = await Promise.all([readText(fileA), readText(fileB)]);
-      const cuesA = parseAny(fileA.name, textA).cues;
-      const cuesB = parseAny(fileB.name, textB).cues;
-      const merged = mergeCues(cuesA, cuesB, options.mode || "dual", Number(options.gapMs) || 1000);
-      return download(`${baseName(fileA.name)}.merged.srt`, toSrtText(merged), "text/plain");
+      if (files.length < 2) throw new Error("Please add at least two subtitle files.");
+      const parsed = await Promise.all(
+        files.map(async (f) => parseAny(f.name, await readText(f)).cues)
+      );
+      const gapMs = Number(options.gapMs) || 1000;
+      const merged =
+        files.length === 2 && options.mode === "dual"
+          ? mergeCues(parsed[0], parsed[1], "dual", gapMs)
+          : mergeCuesSequential(parsed, gapMs);
+      return download(`${baseName(files[0].name)}.merged.srt`, toSrtText(merged), "text/plain");
     },
   },
 
