@@ -362,6 +362,20 @@
   border-bottom: 1px solid var(--border-soft);
 }
 
+.stream-table__head-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.stream-table__chevron {
+  display: none;
+  flex-shrink: 0;
+  color: var(--text-faint);
+  font-size: 10px;
+  transition: transform 0.15s ease;
+}
+
 .stream-table__all-btn {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -640,6 +654,22 @@
   }
   .meter {
     height: 64px;
+  }
+
+  /* audio/subtitle tables stack on mobile — let each one collapse
+     to a dropdown so they don't both take up the full screen at once */
+  .stream-table__head {
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .stream-table__chevron {
+    display: inline-block;
+  }
+  .stream-table--collapsed .stream-table__chevron {
+    transform: rotate(-90deg);
+  }
+  .stream-table--collapsed .stream-table__body {
+    display: none;
   }
 }
 

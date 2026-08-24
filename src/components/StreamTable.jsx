@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { guessSubtitleExtension } from "../lib/ffmpegEngine";
 
 const AUDIO_FORMATS = ["mp3", "wav", "ogg", "flac", "aac"];
@@ -16,43 +17,71 @@ export default function StreamTable({
   onDownloadOne,
   onDownloadAll,
 }) {
+  const [collapsed, setCollapsed] = useState(false);
   const isAudio = kind === "audio";
   const hasStreams = streams.length > 0;
   const allRunning = allStatus === "extracting";
 
   return (
-    <div className="stream-table">
-      <div className="stream-table__head">
+    <div className={`stream-table${collapsed ? " stream-table--collapsed" : ""}`}>
+      <div
+        className="stream-table__head"
+        onClick={() => setCollapsed((c) => !c)}
+        role="button"
+        tabIndex={0}
+        aria-expanded={!collapsed}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setCollapsed((c) => !c);
+          }
+        }}
+      >
         <span>
           {title}
           {hasStreams && <span className="stream-table__count">{streams.length}</span>}
         </span>
-        {hasStreams &&
-          (allRunning ? (
-            <span className="stream-table__all-progress">{Math.round(allProgress * 100)}%</span>
-          ) : allStatus === "done" ? (
-            <button className="stream-table__all-btn" onClick={onDownloadAll}>
-              Download all
-            </button>
-          ) : (
-            <button
-              className="stream-table__all-btn"
-              disabled={disabled || streams.length < 2}
-              onClick={onExtractAll}
-              title={streams.length < 2 ? "Only one track — use Extract" : "Extract every track, zipped"}
-            >
-              Extract all
-            </button>
-          ))}
+        <span className="stream-table__head-right">
+          {hasStreams &&
+            (allRunning ? (
+              <span className="stream-table__all-progress">{Math.round(allProgress * 100)}%</span>
+            ) : allStatus === "done" ? (
+              <button
+                className="stream-table__all-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDownloadAll();
+                }}
+              >
+                Download all
+              </button>
+            ) : (
+              <button
+                className="stream-table__all-btn"
+                disabled={disabled || streams.length < 2}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onExtractAll();
+                }}
+                title={streams.length < 2 ? "Only one track — use Extract" : "Extract every track, zipped"}
+              >
+                Extract all
+              </button>
+            ))}
+          <span className="stream-table__chevron" aria-hidden="true">
+            ▾
+          </span>
+        </span>
       </div>
 
-      {!hasStreams ? (
-        <p className="stream-table__empty">
-          {disabled ? "checking…" : `no ${kind} tracks found`}
-        </p>
-      ) : (
-        <ul className="stream-table__rows">
-          {streams.map((s) => (
+      <div className="stream-table__body">
+        {!hasStreams ? (
+          <p className="stream-table__empty">
+            {disabled ? "checking…" : `no ${kind} tracks found`}
+          </p>
+        ) : (
+          <ul className="stream-table__rows">
+            {streams.map((s) => (
             <li key={s.index} className="stream-row">
               <div className="stream-row__label">
                 <span className="stream-row__name" title={s.label}>
@@ -105,8 +134,9 @@ export default function StreamTable({
               {s.status === "error" && <p className="stream-row__error">{s.error}</p>}
             </li>
           ))}
-        </ul>
-      )}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }
