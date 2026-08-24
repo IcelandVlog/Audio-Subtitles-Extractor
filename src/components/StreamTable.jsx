@@ -23,7 +23,10 @@ export default function StreamTable({
   return (
     <div className="stream-table">
       <div className="stream-table__head">
-        <span>{title}</span>
+        <span>
+          {title}
+          {hasStreams && <span className="stream-table__count">{streams.length}</span>}
+        </span>
         {hasStreams &&
           (allRunning ? (
             <span className="stream-table__all-progress">{Math.round(allProgress * 100)}%</span>

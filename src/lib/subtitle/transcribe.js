@@ -5,6 +5,15 @@ import { pipeline, env } from "@huggingface/transformers";
 // the first run, same as the ffmpeg core assets are cached).
 env.allowLocalModels = false;
 
+// onnxruntime-web can spread WASM inference across multiple CPU cores, but only
+// when the page is "cross-origin isolated" (COOP/COEP response headers present
+// on whatever host serves this app) — that's what unlocks SharedArrayBuffer.
+// Without those headers it silently runs single-threaded no matter how many
+// cores the machine has, so we only opt in when it's actually available.
+if (typeof window !== "undefined" && window.crossOriginIsolated && navigator.hardwareConcurrency) {
+  env.backends.onnx.wasm.numThreads = navigator.hardwareConcurrency;
+}
+
 function modelIdFor(quality, language) {
   // English-only checkpoints are smaller and noticeably faster than the
   // multilingual ones, so use them whenever the person picked English.

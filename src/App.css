@@ -385,6 +385,23 @@
   color: var(--amber);
 }
 
+.stream-table__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  margin-left: 8px;
+  padding: 0 5px;
+  font-size: 10px;
+  letter-spacing: 0;
+  color: var(--phosphor);
+  background: var(--surface);
+  border: 1px solid var(--phosphor-dim);
+  border-radius: 999px;
+  vertical-align: 1px;
+}
+
 .stream-table__empty {
   padding: 16px 14px;
   margin: 0;
