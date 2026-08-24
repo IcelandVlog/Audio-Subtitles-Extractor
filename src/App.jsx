@@ -64,9 +64,19 @@ export default function App() {
           <span className="nav__dot" />
           STRIP
         </button>
-        <AllToolsMenu
-          onSelectTool={(id) => navigate(id === "extract-subtitles-from-video" ? "/" : toolPathFor(id))}
-        />
+        <div className="nav__tools">
+          <AllToolsMenu
+            onSelectTool={(id) => navigate(id === "extract-subtitles-from-video" ? "/" : toolPathFor(id))}
+          />
+          <a
+            className="all-tools__btn"
+            href="https://subtitle-translator-orpin.vercel.app"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Subtitle Translate
+          </a>
+        </div>
         <div className="nav__right">
           <a
             className="nav__link"

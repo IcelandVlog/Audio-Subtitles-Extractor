@@ -656,6 +656,20 @@
     height: 64px;
   }
 
+  .nav {
+    flex-wrap: wrap;
+    row-gap: 12px;
+  }
+  .nav__tools {
+    order: 3;
+    width: 100%;
+    justify-content: center;
+  }
+  .nav__tools .all-tools__btn {
+    flex: 1;
+    justify-content: center;
+  }
+
   /* audio/subtitle tables stack on mobile — let each one collapse
      to a dropdown so they don't both take up the full screen at once */
   .stream-table__head {
@@ -679,6 +693,12 @@
   position: relative;
 }
 
+.nav__tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .all-tools__btn {
   display: flex;
   align-items: center;
@@ -691,6 +711,8 @@
   font-family: var(--font-mono);
   font-size: 13px;
   letter-spacing: 0.02em;
+  text-decoration: none;
+  white-space: nowrap;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
