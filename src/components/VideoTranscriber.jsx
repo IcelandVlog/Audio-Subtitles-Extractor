@@ -13,6 +13,13 @@ const STAGE_LABEL = {
   transcribing: "Listening and writing it down…",
 };
 
+function fmtDuration(seconds) {
+  const s = Math.round(seconds);
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  return m > 0 ? `${m}m ${rem}s` : `${rem}s`;
+}
+
 export default function VideoTranscriber({ onHome }) {
   const [file, setFile] = useState(null);
   const [quality, setQuality] = useState("fast");
@@ -22,6 +29,7 @@ export default function VideoTranscriber({ onHome }) {
   const [error, setError] = useState("");
   const [cues, setCues] = useState(null);
   const [hadSubtitles, setHadSubtitles] = useState(false);
+  const [durationS, setDurationS] = useState(null);
   const inputRef = useRef(null);
 
   const busy = stage !== "idle" && stage !== "done" && stage !== "error";
@@ -45,6 +53,7 @@ export default function VideoTranscriber({ onHome }) {
       setProgress(0);
       const probed = await probeFile(file, { onProgress: setProgress });
       inputName = probed.inputName;
+      setDurationS(probed.duration || null);
 
       const audioStream = probed.streams.find((s) => s.type === "Audio");
       if (!audioStream) {
@@ -72,11 +81,16 @@ export default function VideoTranscriber({ onHome }) {
           setStage("loading-model");
           setProgress(p);
         },
+        onTranscribeStart: () => {
+          setStage("transcribing");
+          setProgress(0);
+        },
+        onChunkProgress: (p) => {
+          setStage("transcribing");
+          setProgress(p);
+        },
       });
 
-      setStage("transcribing");
-      // transcribeToCues resolves only once generation is done, so by the time
-      // we get here it's already finished — this just settles the UI on 100%.
       setProgress(1);
       setCues(result);
       setStage("done");
@@ -122,7 +136,9 @@ export default function VideoTranscriber({ onHome }) {
         <p className="tool-page__hint">
           For videos that don't already have subtitles. Strip listens to the audio track and writes
           out the dialogue, with timestamps, entirely in this browser tab — nothing is uploaded
-          anywhere. The speech model downloads once on first use and is cached after that.
+          anywhere. The speech model downloads once on first use and is cached after that. Services
+          like TurboScribe transcribe in seconds because they run on rented datacenter GPUs; this
+          runs on your own device instead, which is slower but completely private.
         </p>
 
         <div
@@ -154,6 +170,14 @@ export default function VideoTranscriber({ onHome }) {
           </p>
         )}
 
+        {durationS != null && stage === "idle" && (
+          <p className="tool-page__hint">
+            ~{fmtDuration(durationS)} of audio. Everything runs on your device's CPU (or GPU, if
+            your browser supports WebGPU) — no cloud processing — so longer files take longer,
+            sometimes well beyond the clip's own length. "Fast" quality is the quickest option.
+          </p>
+        )}
+
         <div className="tool-modal__fields">
           <label className="tool-modal__field">
             <span>Speed / accuracy</span>
@@ -179,7 +203,9 @@ export default function VideoTranscriber({ onHome }) {
             <div className="tool-modal__progress-bar">
               <div className="tool-modal__progress-fill" style={{ width: `${Math.round(progress * 100)}%` }} />
             </div>
-            <span>{STAGE_LABEL[stage] || "Working…"}</span>
+            <span>
+              {STAGE_LABEL[stage] || "Working…"} {Math.round(progress * 100)}%
+            </span>
           </div>
         )}
 
