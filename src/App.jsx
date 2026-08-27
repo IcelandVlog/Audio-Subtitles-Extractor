@@ -47,10 +47,12 @@ export default function App() {
     queueAudioAllProgress,
     extractAllAudioQueue,
     downloadAllAudioQueue,
+    queueAudioExtractedCount,
     queueSubsAllStatus,
     queueSubsAllProgress,
     extractAllSubtitlesQueue,
     downloadAllSubtitlesQueue,
+    queueSubsExtractedCount,
   } = useTrackQueue();
 
   const anyBusy = tracks.some(
@@ -131,8 +133,9 @@ export default function App() {
             </h1>
             <p className="hero__sub">
               Drop in one or many videos and Strip lists every audio and subtitle track it finds —
-              pull one out at a time, or grab everything of a kind at once as a zip. Everything runs
-              in this browser tab, so nothing ever leaves your machine.
+              pull out the ones you want, one at a time, then bundle whatever you've extracted
+              across every file into a single zip. Everything runs in this browser tab, so nothing
+              ever leaves your machine.
             </p>
             <Meter active={anyBusy} />
           </section>
@@ -154,7 +157,8 @@ export default function App() {
                     label="All audio"
                     status={queueAudioAllStatus}
                     progress={queueAudioAllProgress}
-                    disabled={anyBusy || !tracks.some((t) => t.audioStreams.length > 0)}
+                    extractedCount={queueAudioExtractedCount}
+                    disabled={anyBusy || queueAudioExtractedCount === 0}
                     onExtract={extractAllAudioQueue}
                     onDownload={downloadAllAudioQueue}
                   />
@@ -162,7 +166,8 @@ export default function App() {
                     label="All subtitles"
                     status={queueSubsAllStatus}
                     progress={queueSubsAllProgress}
-                    disabled={anyBusy || !tracks.some((t) => t.subtitleStreams.length > 0)}
+                    extractedCount={queueSubsExtractedCount}
+                    disabled={anyBusy || queueSubsExtractedCount === 0}
                     onExtract={extractAllSubtitlesQueue}
                     onDownload={downloadAllSubtitlesQueue}
                   />
@@ -201,10 +206,12 @@ export default function App() {
   );
 }
 
-// One "Extract all <kind>, across every file" control for the queue toolbar.
-// Audio and subtitles each get their own instance, so the two stay separate
-// zips even though both pull from every file in the queue at once.
-function QueueBulkAction({ label, status, progress, disabled, onExtract, onDownload }) {
+// One "bundle whatever I've already extracted by hand, across every file"
+// control for the queue toolbar. This never extracts anything new — it just
+// zips together the audio (or subtitle) tracks that already have a manual
+// per-track "Extract" done, wherever they came from in the queue. Audio and
+// subtitles each get their own instance, so the two stay separate zips.
+function QueueBulkAction({ label, status, progress, extractedCount, disabled, onExtract, onDownload }) {
   return (
     <div className="queue__bulk-item">
       <span className="queue__bulk-label">{label}</span>
@@ -212,7 +219,7 @@ function QueueBulkAction({ label, status, progress, disabled, onExtract, onDownl
         <span className="queue__bulk-progress">{Math.round(progress * 100)}%</span>
       ) : status === "done" ? (
         <button type="button" className="queue__bulk-btn" onClick={onDownload}>
-          Download all ↓
+          Download zip ↓
         </button>
       ) : (
         <button
@@ -220,9 +227,15 @@ function QueueBulkAction({ label, status, progress, disabled, onExtract, onDownl
           className="queue__bulk-btn"
           disabled={disabled}
           onClick={onExtract}
-          title={`Extract ${label.toLowerCase()} from every file, zipped together`}
+          title={
+            extractedCount > 0
+              ? `Zip together the ${extractedCount} ${label.toLowerCase()} track${
+                  extractedCount > 1 ? "s" : ""
+                } you've already extracted`
+              : `Extract at least one ${label.toLowerCase().replace(/^all /, "")} track first, then bundle it here`
+          }
         >
-          Extract all files
+          {extractedCount > 0 ? `Bundle extracted (${extractedCount})` : "Bundle extracted"}
         </button>
       )}
       {status === "error" && <span className="queue__bulk-error">failed</span>}

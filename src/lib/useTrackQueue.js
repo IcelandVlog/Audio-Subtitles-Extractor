@@ -460,35 +460,37 @@ export function useTrackQueue() {
     [extractAllOfKind]
   );
 
-  // ---- queue-level: same kind of extraction, but across every file in the
-  // queue at once. Audio and subtitles are still extracted and zipped
-  // separately from each other — this only merges "the same kind" across
-  // files, not audio with subtitles.
-  const extractAllOfKindForQueue = useCallback(
+  // ---- queue-level: bundle whatever the user has already pulled out one at a
+  // time, across every file in the queue, into a single zip. This does NOT
+  // extract anything new — it only collects streams of one kind (audio or
+  // subtitle) that are already status "done" from a manual per-track Extract
+  // click, and zips those together. If someone has extracted 3 audio tracks
+  // out of 10 files, clicking "Bundle extracted" zips exactly those 3.
+  const bundleExtractedOfKindForQueue = useCallback(
     async (kind) => {
-      const relevantTracks = tracksRef.current.filter(
-        (t) => t.status === "ready" && (kind === "audio" ? t.audioStreams : t.subtitleStreams).length > 0
-      );
-      if (relevantTracks.length === 0) return;
+      const tracksNow = tracksRef.current;
+      const extractedEntries = [];
+      for (const track of tracksNow) {
+        const list = kind === "audio" ? track.audioStreams : track.subtitleStreams;
+        for (const stream of list) {
+          if (stream.status === "done" && stream.result?.blob) {
+            extractedEntries.push({ track, stream });
+          }
+        }
+      }
+
+      if (extractedEntries.length === 0) return;
 
       const setStatus = kind === "audio" ? setQueueAudioAllStatus : setQueueSubsAllStatus;
       const setProgress = kind === "audio" ? setQueueAudioAllProgress : setQueueSubsAllProgress;
       const setResult = kind === "audio" ? setQueueAudioAllResult : setQueueSubsAllResult;
-      const statusKey = kind === "audio" ? "audioAllStatus" : "subsAllStatus";
-      const progressKey = kind === "audio" ? "audioAllProgress" : "subsAllProgress";
 
-      setStatus("extracting");
+      setStatus("extracting"); // reused as "bundling" here — same idle/extracting/done/error shape
       setProgress(0);
       setResult(null);
 
       const zip = new JSZip();
       const usedNames = new Set();
-      const perTrackProgress = new Array(relevantTracks.length).fill(0);
-
-      const reportOverall = () => {
-        const avg = perTrackProgress.reduce((a, b) => a + b, 0) / perTrackProgress.length;
-        setProgress(avg);
-      };
 
       // Every file's tracks share one flat zip, so prefix each entry with
       // the source filename to keep names unique and traceable.
@@ -508,95 +510,14 @@ export function useTrackQueue() {
         return candidate;
       };
 
-      let hadError = false;
-
-      for (let ti = 0; ti < relevantTracks.length; ti++) {
-        const track = relevantTracks[ti];
-        const list = kind === "audio" ? track.audioStreams : track.subtitleStreams;
-        const base = stripExt(track.name);
-        const perStreamProgress = new Array(list.length).fill(0);
-
-        patchTrack(track.id, { [statusKey]: "extracting", [progressKey]: 0 });
-
-        const reportTrack = () => {
-          const avg = perStreamProgress.reduce((a, b) => a + b, 0) / perStreamProgress.length;
-          patchTrack(track.id, { [progressKey]: avg });
-          perTrackProgress[ti] = avg;
-          reportOverall();
-        };
-
-        try {
-          for (let i = 0; i < list.length; i++) {
-            const stream = list[i];
-            patchStream(track.id, kind, stream.index, { status: "extracting", progress: 0, error: null });
-
-            const onProgress = (p) => {
-              perStreamProgress[i] = p;
-              reportTrack();
-              patchStream(track.id, kind, stream.index, { progress: p });
-            };
-
-            const langTag = stream.language && stream.language !== "und" ? `.${stream.language}` : "";
-
-            if (kind === "audio") {
-              let native = stream.native;
-              if (!native) {
-                native = await extractAudioNative({
-                  inputName: track.inputName,
-                  streamIndex: stream.index,
-                  codec: stream.codec,
-                  onProgress: (p) => onProgress(p * 0.6),
-                });
-                patchStream(track.id, kind, stream.index, { native });
-              }
-              const blob = formatMatchesCodec(stream.format, native.codec)
-                ? native.blob
-                : await convertAudioFromNative({
-                    nativeBlob: native.blob,
-                    nativeExtension: native.extension,
-                    streamIndex: stream.index,
-                    format: stream.format,
-                    onProgress: (p) => onProgress(0.6 + p * 0.4),
-                  });
-              zip.file(uniqueName(`${base}${langTag}.${stream.format}`), blob);
-              patchStream(track.id, kind, stream.index, {
-                status: "done",
-                progress: 1,
-                result: { extension: stream.format, blob },
-              });
-            } else {
-              const { blob, extension } = await extractSubtitle({
-                inputName: track.inputName,
-                streamIndex: stream.index,
-                codec: stream.codec,
-                onProgress,
-              });
-              zip.file(uniqueName(`${base}${langTag}.${extension}`), blob);
-              patchStream(track.id, kind, stream.index, {
-                status: "done",
-                progress: 1,
-                result: { extension, blob },
-              });
-            }
-            perStreamProgress[i] = 1;
-            reportTrack();
-          }
-          patchTrack(track.id, { [statusKey]: "done", [progressKey]: 1 });
-        } catch {
-          hadError = true;
-          patchTrack(track.id, { [statusKey]: "error", [progressKey]: 0 });
-        }
-        perTrackProgress[ti] = 1;
-        reportOverall();
-      }
-
-      if (hadError) {
-        setStatus("error");
-        setProgress(0);
-        return;
-      }
-
       try {
+        extractedEntries.forEach(({ track, stream }, i) => {
+          const base = stripExt(track.name);
+          const langTag = stream.language && stream.language !== "und" ? `.${stream.language}` : "";
+          zip.file(uniqueName(`${base}${langTag}.${stream.result.extension}`), stream.result.blob);
+          setProgress((i + 1) / extractedEntries.length);
+        });
+
         const zipBlob = await zip.generateAsync({ type: "blob" });
         setStatus("done");
         setProgress(1);
@@ -606,16 +527,28 @@ export function useTrackQueue() {
         setProgress(0);
       }
     },
-    [patchTrack, patchStream]
+    []
   );
 
   const extractAllAudioQueue = useCallback(
-    () => extractAllOfKindForQueue("audio"),
-    [extractAllOfKindForQueue]
+    () => bundleExtractedOfKindForQueue("audio"),
+    [bundleExtractedOfKindForQueue]
   );
   const extractAllSubtitlesQueue = useCallback(
-    () => extractAllOfKindForQueue("subtitle"),
-    [extractAllOfKindForQueue]
+    () => bundleExtractedOfKindForQueue("subtitle"),
+    [bundleExtractedOfKindForQueue]
+  );
+
+  // Counts of already-extracted (status "done") streams of each kind across
+  // the whole queue right now — used to enable/disable + label the queue
+  // bundle buttons ("Bundle extracted (3)").
+  const queueAudioExtractedCount = tracks.reduce(
+    (n, t) => n + t.audioStreams.filter((s) => s.status === "done").length,
+    0
+  );
+  const queueSubsExtractedCount = tracks.reduce(
+    (n, t) => n + t.subtitleStreams.filter((s) => s.status === "done").length,
+    0
   );
 
   const downloadAllAudioQueue = useCallback(() => {
@@ -658,14 +591,17 @@ export function useTrackQueue() {
     extractAllSubtitles,
     downloadAllAudio,
     downloadAllSubtitles,
-    // queue-wide: same kind, across every file, kept separate from each other
+    // queue-wide: bundles already-extracted streams of one kind, across every
+    // file, into one zip — kept separate from each other
     queueAudioAllStatus,
     queueAudioAllProgress,
     extractAllAudioQueue,
     downloadAllAudioQueue,
+    queueAudioExtractedCount,
     queueSubsAllStatus,
     queueSubsAllProgress,
     extractAllSubtitlesQueue,
     downloadAllSubtitlesQueue,
+    queueSubsExtractedCount,
   };
 }
