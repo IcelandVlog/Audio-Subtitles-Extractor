@@ -12,6 +12,9 @@ import "./App.css";
 // Pulls in @huggingface/transformers + onnxruntime-web (large) — only fetched
 // when someone actually opens this tool, not on every page load.
 const VideoTranscriber = lazy(() => import("./components/VideoTranscriber"));
+// Pulls in node-unrar-js + its wasm (a few MB) — only fetched when this tool
+// is actually opened, so it never slows down the initial page load.
+const ArchiveExtractor = lazy(() => import("./components/ArchiveExtractor"));
 
 const THEME_KEY = "strip-theme";
 
@@ -76,7 +79,7 @@ export default function App() {
         </button>
         <div className="nav__tools">
           <AllToolsMenu
-            onSelectTool={(id) => navigate(id === "extract-subtitles-from-video" ? "/" : toolPathFor(id))}
+            onSelectTool={(id) => navigate(toolPathFor(id))}
           />
           <a
             className="all-tools__btn"
@@ -110,6 +113,16 @@ export default function App() {
 
       {activeToolId === "timed-lyrics-editor" ? (
         <LyricsEditor onHome={goHome} />
+      ) : activeToolId === "archive-extractor" ? (
+        <Suspense
+          fallback={
+            <main className="shell">
+              <p className="tool-page__hint">Loading the archive extractor…</p>
+            </main>
+          }
+        >
+          <ArchiveExtractor onHome={goHome} />
+        </Suspense>
       ) : activeToolId === "video-to-subtitles" ? (
         <Suspense
           fallback={

@@ -444,7 +444,8 @@ export function useTrackQueue() {
           reportOverall();
         }
 
-        const zipBlob = await zip.generateAsync({ type: "blob" });
+        // STORE: these are already-encoded audio/subtitle blobs, so skip DEFLATE.
+        const zipBlob = await zip.generateAsync({ type: "blob", compression: "STORE" });
         const resultKey = kind === "audio" ? "audioAllResult" : "subsAllResult";
         patchTrack(trackId, { [statusKey]: "done", [progressKey]: 1, [resultKey]: zipBlob });
       } catch {
@@ -518,7 +519,7 @@ export function useTrackQueue() {
           setProgress((i + 1) / extractedEntries.length);
         });
 
-        const zipBlob = await zip.generateAsync({ type: "blob" });
+        const zipBlob = await zip.generateAsync({ type: "blob", compression: "STORE" });
         setStatus("done");
         setProgress(1);
         setResult(zipBlob);
