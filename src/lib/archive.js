@@ -26,16 +26,48 @@ function sniffArchiveKindFromBytes(head) {
   return null;
 }
 
-// Reads the whole file into memory once, up front, with a couple of retries.
-// Why this exists: the browser throws a generic "could not be read... after a
-// reference to a file was acquired" (NotReadableError) when the underlying
-// file handle goes stale between being picked and being read — most often
-// because it's a cloud-sync placeholder (OneDrive/Google Drive "on demand")
-// that hadn't finished downloading yet, or antivirus briefly locked it right
-// after selection. A short retry clears most of those transient cases, and
-// reading once here (instead of once to sniff + again to open) means we only
-// touch the File object a single time, which removes the other common
-// trigger for this error.
+// Three different ways to pull bytes out of a File — browsers implement
+// these through genuinely different internal code paths, so a file that a
+// NotReadableError on one can sometimes still be read by another.
+function readViaFileReader(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error("FileReader failed"));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function readViaStream(file) {
+  const stream = file.stream();
+  const reader = stream.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    total += value.byteLength;
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    out.set(c, offset);
+    offset += c.byteLength;
+  }
+  return out.buffer;
+}
+
+// Reads the whole file into memory once, up front. Why this exists: the
+// browser throws a generic "could not be read... after a reference to a file
+// was acquired" (NotReadableError) when the underlying file handle goes
+// stale between being picked and being read — most often because it's a
+// cloud-sync placeholder (OneDrive/Google Drive "on demand") that hadn't
+// finished downloading yet, or antivirus briefly locked it right after
+// selection. We retry the normal path a few times first (clears most
+// transient cases), then fall back to two other browser APIs that read the
+// same File through different internal code — one of them frequently
+// succeeds even when the first is stuck failing.
 async function readFileWithRetry(file, attempts = 3) {
   let lastErr;
   for (let i = 0; i < attempts; i++) {
@@ -47,7 +79,18 @@ async function readFileWithRetry(file, attempts = 3) {
       await new Promise((r) => setTimeout(r, 300 * (i + 1)));
     }
   }
+
   if (lastErr?.name === "NotReadableError") {
+    try {
+      return await readViaFileReader(file);
+    } catch {
+      // fall through to the stream attempt below
+    }
+    try {
+      return await readViaStream(file);
+    } catch {
+      // fall through to the friendly error below
+    }
     throw new Error(
       "The browser couldn't read this file — this usually happens with files still syncing from " +
         "OneDrive/Google Drive (not fully downloaded to this device yet), a file on a network drive, " +

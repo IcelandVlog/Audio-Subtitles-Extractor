@@ -146,7 +146,21 @@ export default function ArchiveExtractor({ onHome }) {
         </div>
 
         {listStatus === "listing" && <p className="tool-page__hint">Reading the file list…</p>}
-        {listStatus === "error" && <p className="tool-modal__error">{listError}</p>}
+        {listStatus === "error" && (
+          <>
+            <p className="tool-modal__error">{listError}</p>
+            <div className="tool-modal__actions">
+              <button type="button" className="tool-modal__cancel" onClick={reset}>
+                Choose a different file
+              </button>
+              {file && (
+                <button type="button" className="tool-modal__run" onClick={() => handlePick(file)}>
+                  Try again
+                </button>
+              )}
+            </div>
+          </>
+        )}
 
         {listStatus === "listed" && (
           <>
