@@ -231,6 +231,61 @@
   margin-bottom: 14px;
 }
 
+.queue__bulk {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.queue__bulk-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  padding: 8px 14px;
+}
+
+.queue__bulk-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.queue__bulk-btn {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  background: none;
+  border: none;
+  color: var(--phosphor);
+  cursor: pointer;
+  padding: 2px 0;
+}
+.queue__bulk-btn:hover:not(:disabled) {
+  text-decoration: underline;
+}
+.queue__bulk-btn:disabled {
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+.queue__bulk-progress {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--amber);
+}
+
+.queue__bulk-error {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--red);
+}
+
 /* ---------- track / channel strip ---------- */
 
 .track {

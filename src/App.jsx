@@ -43,6 +43,14 @@ export default function App() {
     extractAllSubtitles,
     downloadAllAudio,
     downloadAllSubtitles,
+    queueAudioAllStatus,
+    queueAudioAllProgress,
+    extractAllAudioQueue,
+    downloadAllAudioQueue,
+    queueSubsAllStatus,
+    queueSubsAllProgress,
+    extractAllSubtitlesQueue,
+    downloadAllSubtitlesQueue,
   } = useTrackQueue();
 
   const anyBusy = tracks.some(
@@ -74,14 +82,13 @@ export default function App() {
             target="_blank"
             rel="noreferrer"
           >
-            Subtitle Translator
+            Subtitle Translate
           </a>
         </div>
         <div className="nav__right">
           <a
             className="nav__link"
-            href="https://github.com/IcelandVlog/Audio-Subtitles-Extractor"
-            // href="https://github.com/Bisalkumar/Audio-Extractor"
+            href="https://github.com/Bisalkumar/Audio-Extractor"
             target="_blank"
             rel="noreferrer"
           >
@@ -140,6 +147,28 @@ export default function App() {
                 <span>queue</span>
                 <span>{tracks.length} file{tracks.length > 1 ? "s" : ""}</span>
               </div>
+
+              {tracks.length > 1 && (
+                <div className="queue__bulk">
+                  <QueueBulkAction
+                    label="All audio"
+                    status={queueAudioAllStatus}
+                    progress={queueAudioAllProgress}
+                    disabled={anyBusy || !tracks.some((t) => t.audioStreams.length > 0)}
+                    onExtract={extractAllAudioQueue}
+                    onDownload={downloadAllAudioQueue}
+                  />
+                  <QueueBulkAction
+                    label="All subtitles"
+                    status={queueSubsAllStatus}
+                    progress={queueSubsAllProgress}
+                    disabled={anyBusy || !tracks.some((t) => t.subtitleStreams.length > 0)}
+                    onExtract={extractAllSubtitlesQueue}
+                    onDownload={downloadAllSubtitlesQueue}
+                  />
+                </div>
+              )}
+
               {tracks.map((t, i) => (
                 <TrackCard
                   key={t.id}
@@ -169,5 +198,34 @@ export default function App() {
         </p>
       </footer>
     </>
+  );
+}
+
+// One "Extract all <kind>, across every file" control for the queue toolbar.
+// Audio and subtitles each get their own instance, so the two stay separate
+// zips even though both pull from every file in the queue at once.
+function QueueBulkAction({ label, status, progress, disabled, onExtract, onDownload }) {
+  return (
+    <div className="queue__bulk-item">
+      <span className="queue__bulk-label">{label}</span>
+      {status === "extracting" ? (
+        <span className="queue__bulk-progress">{Math.round(progress * 100)}%</span>
+      ) : status === "done" ? (
+        <button type="button" className="queue__bulk-btn" onClick={onDownload}>
+          Download all ↓
+        </button>
+      ) : (
+        <button
+          type="button"
+          className="queue__bulk-btn"
+          disabled={disabled}
+          onClick={onExtract}
+          title={`Extract ${label.toLowerCase()} from every file, zipped together`}
+        >
+          Extract all files
+        </button>
+      )}
+      {status === "error" && <span className="queue__bulk-error">failed</span>}
+    </div>
   );
 }
