@@ -57,13 +57,12 @@ const SUBTITLE_TEXT_CODECS = new Set([
   "text",
 ]);
 
-// Applied before -i on every extraction call (not the initial probe, which
-// needs a real full analysis to report accurate stream/duration info). We
-// already know the exact streams/codecs from that probe, so there's nothing
-// left to discover here — this just stops ffmpeg from redundantly re-scanning
-// bitstream data on every subsequent exec() to "double check" duration/codec
-// details it doesn't need for a straight stream copy.
-const FAST_OPEN_ARGS = ["-probesize", "5000000", "-analyzeduration", "0"];
+// Previously tried "-probesize"/"-analyzeduration" hints here to skip
+// redundant re-analysis on every extraction call, but that risked
+// mis-detecting duration/misbehaving on some Matroska files and made things
+// worse rather than better — left as a no-op hook rather than removed
+// outright, in case a *safe* version of this optimization is worth revisiting.
+const FAST_OPEN_ARGS = [];
 
 /** Extension we'll produce for a subtitle stream, without actually running ffmpeg. */
 export function guessSubtitleExtension(codec) {
@@ -103,7 +102,19 @@ function parseProbeLog(log) {
 // heap. That's what lets files well past the ~2GB wasm memory ceiling be
 // probed/extracted at all — the whole video is never resident in memory at
 // once, only whatever chunk is currently being read.
+//
+// The catch: every one of those lazy reads is a synchronous FileReaderSync
+// call, and ffmpeg's demuxer issues a LOT of them (default internal read
+// buffer is tens of KB, so a multi-GB file means tens of thousands of calls).
+// That per-call overhead makes WORKERFS meaningfully slower than a plain
+// in-memory copy. So: use it only when the file is actually too big to fit
+// in memory — everything else takes the fast MEMFS path it used to.
+const MEMFS_SAFE_BYTES = 1.5 * 1024 * 1024 * 1024; // stay under the ~2GB wasm heap cap with headroom
 let mountCounter = 0;
+
+function safeName(name) {
+  return name.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
 
 async function mountInputFile(ffmpeg, file) {
   const mountPoint = `/in_${++mountCounter}`;
@@ -114,14 +125,35 @@ async function mountInputFile(ffmpeg, file) {
   return `${mountPoint}/${file.name}`;
 }
 
+/** Read a File into memory while reporting real byte-level progress (0..1). */
+function readFileWithProgress(file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onprogress = (e) => {
+      if (onProgress && e.lengthComputable) onProgress(e.loaded / e.total);
+    };
+    reader.onload = () => resolve(new Uint8Array(reader.result));
+    reader.onerror = () => reject(reader.error || new Error("Couldn't read this file."));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
 /** Run `ffmpeg -i` (which always "fails" with no output) purely to read its stream report. */
 export function probeFile(file, { onProgress, onUploaded } = {}) {
   return runExclusive(async () => {
     const ffmpeg = await loadEngine();
-    const inputName = await mountInputFile(ffmpeg, file);
-    // No bulk read happens anymore, so there's no real byte-progress phase —
-    // report done immediately and move straight to probing.
-    onProgress?.(1);
+    let inputName;
+    if (file.size <= MEMFS_SAFE_BYTES) {
+      // Fast path: whole file fits comfortably in the wasm heap, so a plain
+      // in-memory copy — no per-chunk read overhead — is quickest.
+      inputName = safeName(file.name);
+      const data = await readFileWithProgress(file, onProgress);
+      await ffmpeg.writeFile(inputName, data);
+    } else {
+      // Fallback for files too big to fit in memory at all.
+      inputName = await mountInputFile(ffmpeg, file);
+      onProgress?.(1);
+    }
     onUploaded?.();
 
     let log = "";
@@ -444,8 +476,17 @@ export function extractSubtitle({ inputName, streamIndex, codec, onProgress }) {
 
 export async function cleanupInput(inputName) {
   if (!ffmpegInstance) return;
-  // inputName is "<mountPoint>/<original file name>" (see mountInputFile) —
-  // unmount and remove the mount directory itself, not a MEMFS file.
+  // MEMFS path: a plain filename with no "/" (see safeName). WORKERFS path:
+  // "<mountPoint>/<original file name>" (see mountInputFile) — for that one,
+  // unmount and remove the mount directory instead of deleting a file.
+  if (!inputName.includes("/")) {
+    try {
+      await ffmpegInstance.deleteFile(inputName);
+    } catch {
+      // already gone, ignore
+    }
+    return;
+  }
   const mountPoint = inputName.slice(0, inputName.lastIndexOf("/"));
   try {
     await ffmpegInstance.unmount(mountPoint);
