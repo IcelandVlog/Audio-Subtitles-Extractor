@@ -3,6 +3,8 @@ import JSZip from "jszip";
 import {
   probeFile,
   extractSubtitle,
+  extractAudioNativeBatch,
+  extractSubtitleBatch,
   cleanupInput,
   loadEngine,
   extractAudioNative,
@@ -389,30 +391,42 @@ export function useTrackQueue() {
         return candidate;
       };
 
+      list.forEach((stream) =>
+        patchStream(trackId, kind, stream.index, { status: "extracting", progress: 0, error: null })
+      );
+
+      const setAll = (p) => {
+        perStreamProgress.fill(p);
+        reportOverall();
+        list.forEach((stream) => patchStream(trackId, kind, stream.index, { progress: p }));
+      };
+
       try {
-        for (let i = 0; i < list.length; i++) {
-          const stream = list[i];
-          patchStream(trackId, kind, stream.index, { status: "extracting", progress: 0, error: null });
+        if (kind === "audio") {
+          // One combined ffmpeg pass reads the source exactly once and hands
+          // back every requested track's stream-copied native form, instead
+          // of re-opening/re-reading the whole file per track.
+          const needed = list.filter((s) => !s.native);
+          let natives = {};
+          if (needed.length > 0) {
+            natives = await extractAudioNativeBatch({
+              inputName: track.inputName,
+              streams: needed.map((s) => ({ streamIndex: s.index, codec: s.codec })),
+              onProgress: (p) => setAll(p * 0.6),
+            });
+            needed.forEach((s) => {
+              if (natives[s.index]) patchStream(trackId, kind, s.index, { native: natives[s.index] });
+            });
+          } else {
+            setAll(0.6);
+          }
 
-          const onProgress = (p) => {
-            perStreamProgress[i] = p;
-            reportOverall();
-            patchStream(trackId, kind, stream.index, { progress: p });
-          };
-
-          const langTag = stream.language && stream.language !== "und" ? `.${stream.language}` : "";
-
-          if (kind === "audio") {
-            let native = stream.native;
-            if (!native) {
-              native = await extractAudioNative({
-                inputName: track.inputName,
-                streamIndex: stream.index,
-                codec: stream.codec,
-                onProgress: (p) => onProgress(p * 0.6),
-              });
-              patchStream(trackId, kind, stream.index, { native });
-            }
+          // Per-stream format conversion runs on the already-extracted (small)
+          // native blob, not the source video, so a per-stream loop here is fine.
+          for (let i = 0; i < list.length; i++) {
+            const stream = list[i];
+            const native = stream.native || natives[stream.index];
+            const langTag = stream.language && stream.language !== "und" ? `.${stream.language}` : "";
             const blob = formatMatchesCodec(stream.format, native.codec)
               ? native.blob
               : await convertAudioFromNative({
@@ -420,7 +434,12 @@ export function useTrackQueue() {
                   nativeExtension: native.extension,
                   streamIndex: stream.index,
                   format: stream.format,
-                  onProgress: (p) => onProgress(0.6 + p * 0.4),
+                  onProgress: (p) => {
+                    const overall = 0.6 + ((i + p) / list.length) * 0.4;
+                    perStreamProgress[i] = overall;
+                    reportOverall();
+                    patchStream(trackId, kind, stream.index, { progress: overall });
+                  },
                 });
             zip.file(uniqueName(`${base}${langTag}.${stream.format}`), blob);
             patchStream(trackId, kind, stream.index, {
@@ -428,29 +447,35 @@ export function useTrackQueue() {
               progress: 1,
               result: { extension: stream.format, blob },
             });
-          } else {
-            const { blob, extension } = await extractSubtitle({
-              inputName: track.inputName,
-              streamIndex: stream.index,
-              codec: stream.codec,
-              onProgress,
-            });
-            zip.file(uniqueName(`${base}${langTag}.${extension}`), blob);
-            patchStream(trackId, kind, stream.index, {
-              status: "done",
-              progress: 1,
-              result: { extension, blob },
-            });
+            perStreamProgress[i] = 1;
+            reportOverall();
           }
-          perStreamProgress[i] = 1;
-          reportOverall();
+        } else {
+          // Same one-pass idea for subtitles (split only by text-vs-bitmap codec).
+          const results = await extractSubtitleBatch({
+            inputName: track.inputName,
+            streams: list.map((s) => ({ streamIndex: s.index, codec: s.codec })),
+            onProgress: setAll,
+          });
+          list.forEach((stream) => {
+            const r = results[stream.index];
+            if (!r) {
+              patchStream(trackId, kind, stream.index, { status: "error", error: "Extraction failed." });
+              return;
+            }
+            const langTag = stream.language && stream.language !== "und" ? `.${stream.language}` : "";
+            zip.file(uniqueName(`${base}${langTag}.${r.extension}`), r.blob);
+            patchStream(trackId, kind, stream.index, { status: "done", progress: 1, result: r });
+          });
+          setAll(1);
         }
 
         // STORE: these are already-encoded audio/subtitle blobs, so skip DEFLATE.
         const zipBlob = await zip.generateAsync({ type: "blob", compression: "STORE" });
         const resultKey = kind === "audio" ? "audioAllResult" : "subsAllResult";
         patchTrack(trackId, { [statusKey]: "done", [progressKey]: 1, [resultKey]: zipBlob });
-      } catch {
+      } catch (err) {
+        console.error(`[extractAll:${kind}] failed:`, err);
         patchTrack(trackId, { [statusKey]: "error", [progressKey]: 0 });
       }
     },

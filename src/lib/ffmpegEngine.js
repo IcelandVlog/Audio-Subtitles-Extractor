@@ -263,6 +263,114 @@ export function convertAudioFromNative({ nativeBlob, nativeExtension, streamInde
   });
 }
 
+/**
+ * Extract several audio streams' native (stream-copied) form in ONE ffmpeg
+ * pass, instead of one `-i` invocation per stream. `-i` re-parses/re-reads
+ * the whole container from the start every time it's called, so demuxing 8
+ * tracks one-by-one means 8 full linear reads of a multi-GB file. Mapping
+ * every requested stream in a single command reads the source exactly once
+ * no matter how many tracks come out of it.
+ */
+export function extractAudioNativeBatch({ inputName, streams, onProgress }) {
+  return runExclusive(async () => {
+    const ffmpeg = await loadEngine();
+    const outputs = streams.map((s) => {
+      const extension = nativeContainerFor(s.codec);
+      return { ...s, extension, outputName: `native_${s.streamIndex}.${extension}` };
+    });
+
+    const args = ["-i", inputName];
+    for (const o of outputs) {
+      args.push("-map", `0:${o.streamIndex}`, "-c:a", "copy", o.outputName);
+    }
+
+    const progressHandler = ({ progress }) => {
+      if (onProgress && Number.isFinite(progress)) onProgress(Math.min(Math.max(progress, 0), 1));
+    };
+    ffmpeg.on("progress", progressHandler);
+    try {
+      await ffmpeg.exec(args);
+    } finally {
+      ffmpeg.off("progress", progressHandler);
+    }
+
+    const results = {};
+    for (const o of outputs) {
+      const data = await ffmpeg.readFile(o.outputName);
+      results[o.streamIndex] = { blob: new Blob([data.buffer]), extension: o.extension, codec: o.codec };
+      await ffmpeg.deleteFile(o.outputName).catch(() => {});
+    }
+    return results;
+  });
+}
+
+/**
+ * Extract several subtitle streams in ONE ffmpeg pass each for text-based and
+ * bitmap-based codecs (same one-read-instead-of-N rationale as the audio
+ * batch above). Codec type is already known from probing, so — unlike the
+ * single-stream version — no try/convert/catch-and-fallback per stream is
+ * needed; streams are routed to the right group up front.
+ */
+export function extractSubtitleBatch({ inputName, streams, onProgress }) {
+  return runExclusive(async () => {
+    const ffmpeg = await loadEngine();
+    const textStreams = streams.filter((s) => SUBTITLE_TEXT_CODECS.has(s.codec));
+    const bitmapStreams = streams.filter((s) => !SUBTITLE_TEXT_CODECS.has(s.codec));
+    const results = {};
+
+    const progressHandler = ({ progress }) => {
+      if (onProgress && Number.isFinite(progress)) onProgress(Math.min(Math.max(progress, 0), 1));
+    };
+
+    const runGroup = async (group, codecArgs, extension, mimeType) => {
+      if (group.length === 0) return;
+      const outNames = group.map((s) => `subs_${s.streamIndex}.${extension}`);
+      const args = ["-i", inputName];
+      group.forEach((s, i) => {
+        args.push("-map", `0:${s.streamIndex}`, ...codecArgs, outNames[i]);
+      });
+
+      ffmpeg.on("progress", progressHandler);
+      try {
+        await ffmpeg.exec(args);
+      } finally {
+        ffmpeg.off("progress", progressHandler);
+      }
+
+      for (let i = 0; i < group.length; i++) {
+        const data = await ffmpeg.readFile(outNames[i]);
+        results[group[i].streamIndex] = {
+          blob: new Blob([data.buffer], mimeType ? { type: mimeType } : undefined),
+          extension,
+        };
+        await ffmpeg.deleteFile(outNames[i]).catch(() => {});
+      }
+    };
+
+    // Text subtitle -> srt conversion can occasionally fail for a stream
+    // ffprobe still called "text" but ffmpeg can't actually convert; fall
+    // back to handling that group one-by-one (rare) rather than losing the
+    // whole batch's results.
+    try {
+      await runGroup(textStreams, ["-c:s", "srt"], "srt", "text/srt");
+    } catch (err) {
+      console.error("[subs batch] text group failed, falling back per-stream:", err);
+      for (const s of textStreams) {
+        try {
+          const r = await extractSubtitle({ inputName, streamIndex: s.streamIndex, codec: s.codec });
+          results[s.streamIndex] = r;
+        } catch (e2) {
+          console.error(`[subs] stream ${s.streamIndex} failed:`, e2);
+        }
+      }
+    }
+
+    await runGroup(bitmapStreams, ["-c:s", "copy"], "ass");
+
+    return results;
+  });
+}
+
 /** Extract a single audio stream (by absolute ffmpeg stream index) to the requested format. */
 export function extractAudio({ inputName, streamIndex, format, onProgress }) {
   return runExclusive(async () => {
