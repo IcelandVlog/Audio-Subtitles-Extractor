@@ -1,12 +1,12 @@
 import { useRef, useState } from "react";
-import { openArchive } from "../lib/archive";
+import { openArchive, SUPPORTS_FOLDER_SAVE } from "../lib/archive";
 import { downloadBlob, stripExt } from "../lib/download";
 import { formatSize } from "../lib/format";
 import JSZip from "jszip";
 
 export default function ArchiveExtractor({ onHome }) {
   const [file, setFile] = useState(null);
-  const [archive, setArchive] = useState(null); // { kind, entries: [...] } from openArchive
+  const [archive, setArchive] = useState(null); // { kind, sizeLimited } from openArchive
   const [rows, setRows] = useState([]); // per-entry UI state: { name, size, status, error }
   const [listStatus, setListStatus] = useState("idle"); // idle | listing | listed | error
   const [listError, setListError] = useState("");
@@ -14,6 +14,8 @@ export default function ArchiveExtractor({ onHome }) {
   const [bulkProgress, setBulkProgress] = useState(0);
   const [bulkBlob, setBulkBlob] = useState(null);
   const [bulkError, setBulkError] = useState("");
+  const [bulkSavedToFolder, setBulkSavedToFolder] = useState(false);
+  const [bulkFailedCount, setBulkFailedCount] = useState(0);
   const inputRef = useRef(null);
   const archiveRef = useRef(null); // holds the live extractOne/extractAll handle (not state — no need to re-render on this)
 
@@ -28,6 +30,9 @@ export default function ArchiveExtractor({ onHome }) {
     setBulkStatus("idle");
     setBulkProgress(0);
     setBulkBlob(null);
+    setBulkError("");
+    setBulkSavedToFolder(false);
+    setBulkFailedCount(0);
     archiveRef.current = null;
   };
 
@@ -39,7 +44,7 @@ export default function ArchiveExtractor({ onHome }) {
     try {
       const opened = await openArchive(f);
       archiveRef.current = opened;
-      setArchive({ kind: opened.kind });
+      setArchive({ kind: opened.kind, sizeLimited: opened.sizeLimited });
       setRows(opened.entries.map((e) => ({ name: e.name, size: e.size, status: "idle", error: null })));
       setListStatus("listed");
     } catch (err) {
@@ -69,24 +74,66 @@ export default function ArchiveExtractor({ onHome }) {
     downloadBlob(row.blob, flat);
   };
 
-  const handleExtractAll = async () => {
+  const markResults = (failed) => {
+    const failedNames = new Set(failed.map((f) => f.name));
+    const failedByName = new Map(failed.map((f) => [f.name, f.error]));
+    setRows((prev) =>
+      prev.map((r) =>
+        failedNames.has(r.name)
+          ? { ...r, status: "error", error: failedByName.get(r.name) }
+          : { ...r, status: "done" }
+      )
+    );
+    setBulkFailedCount(failed.length);
+  };
+
+  // Preferred path on supported browsers (desktop Chrome/Edge): writes every
+  // file straight to a folder you pick, one at a time — no size ceiling,
+  // since nothing builds up in memory.
+  const handleExtractAllToFolder = async () => {
+    if (!archiveRef.current) return;
+    let dirHandle;
+    try {
+      dirHandle = await window.showDirectoryPicker({ mode: "readwrite" });
+    } catch {
+      return; // user cancelled the picker
+    }
+    setBulkStatus("extracting");
+    setBulkProgress(0);
+    setBulkError("");
+    setBulkSavedToFolder(false);
+    setRows((prev) => prev.map((r) => ({ ...r, status: "extracting", error: null })));
+    try {
+      const { failed } = await archiveRef.current.extractAllToDirectory(dirHandle, setBulkProgress);
+      markResults(failed);
+      setBulkSavedToFolder(true);
+      setBulkStatus("done");
+    } catch (err) {
+      setBulkStatus("error");
+      setBulkError(err?.message || "Couldn't extract all files.");
+      setRows((prev) => prev.map((r) => (r.status === "extracting" ? { ...r, status: "idle" } : r)));
+    }
+  };
+
+  // Fallback path (Safari, mobile, or any browser without folder-write
+  // access): extract everything, bundle into one zip, offer it as a normal
+  // download. Bounded by available memory since the zip is built in-page.
+  const handleExtractAllToZip = async () => {
     if (!archiveRef.current) return;
     setBulkStatus("extracting");
     setBulkProgress(0);
     setBulkBlob(null);
     setBulkError("");
+    setBulkSavedToFolder(false);
     setRows((prev) => prev.map((r) => ({ ...r, status: "extracting", error: null })));
     try {
-      const files = await archiveRef.current.extractAll(setBulkProgress);
-      const byName = new Map(files.map((f) => [f.name, f.blob]));
-      setRows((prev) =>
-        prev.map((r) => (byName.has(r.name) ? { ...r, status: "done", blob: byName.get(r.name) } : r))
-      );
+      const { files, failed } = await archiveRef.current.extractAll(setBulkProgress);
+      markResults(failed);
       const zip = new JSZip();
       for (const f of files) zip.file(f.name, f.blob);
-      // STORE, not DEFLATE: everything going in here (audio/video/subtitle
-      // blobs) is already compressed or incompressible, so re-deflating it
-      // would just burn CPU for no size benefit. STORE is a straight copy.
+      // STORE, not DEFLATE: everything coming out of an archive is already
+      // compressed or incompressible, so re-deflating it would just burn
+      // CPU for no size benefit. STORE is a straight, fast copy.
       const zipBlob = await zip.generateAsync({ type: "blob", compression: "STORE" });
       setBulkBlob(zipBlob);
       setBulkStatus("done");
@@ -96,6 +143,8 @@ export default function ArchiveExtractor({ onHome }) {
       setRows((prev) => prev.map((r) => (r.status === "extracting" ? { ...r, status: "idle" } : r)));
     }
   };
+
+  const handleExtractAll = SUPPORTS_FOLDER_SAVE ? handleExtractAllToFolder : handleExtractAllToZip;
 
   const handleDownloadAll = () => {
     if (!bulkBlob || !file) return;
@@ -120,8 +169,11 @@ export default function ArchiveExtractor({ onHome }) {
         </h1>
         <p className="tool-page__hint">
           Drop in a .zip or .rar file. Strip reads just the file list first — instantly, even on huge
-          archives — then only decompresses the files you actually ask for. Everything happens on
-          your device; nothing is uploaded anywhere.
+          archives — then only pulls the bytes of whichever files you actually extract, streamed
+          straight off disk. No size limit for .zip on this browser.
+          {archive?.kind === "rar" &&
+            " .rar files need to be loaded into memory once to open (a limitation of the RAR format itself), so very large .rar archives are bound by your device's available memory."}
+          {" "}Everything happens on your device; nothing is uploaded anywhere.
         </p>
 
         <div
@@ -174,23 +226,37 @@ export default function ArchiveExtractor({ onHome }) {
                   {bulkStatus === "extracting" ? (
                     <span className="stream-table__all-progress">{Math.round(bulkProgress * 100)}%</span>
                   ) : bulkStatus === "done" ? (
-                    <button className="stream-table__all-btn" onClick={handleDownloadAll}>
-                      Download all (zip)
-                    </button>
+                    bulkSavedToFolder ? (
+                      <span className="stream-table__all-progress">Saved to folder ✓</span>
+                    ) : (
+                      <button className="stream-table__all-btn" onClick={handleDownloadAll}>
+                        Download all (zip)
+                      </button>
+                    )
                   ) : (
                     <button
                       className="stream-table__all-btn"
                       disabled={busy || rows.length === 0}
                       onClick={handleExtractAll}
-                      title="Extract every file in one fast pass and download as a zip"
+                      title={
+                        SUPPORTS_FOLDER_SAVE
+                          ? "Extract every file straight to a folder you choose — no size limit"
+                          : "Extract every file in one fast pass and download as a zip"
+                      }
                     >
-                      Extract all
+                      {SUPPORTS_FOLDER_SAVE ? "Extract all to folder" : "Extract all"}
                     </button>
                   )}
                 </span>
               </div>
 
               {bulkStatus === "error" && <p className="stream-row__error" style={{ padding: "6px 14px 0" }}>{bulkError}</p>}
+              {bulkStatus === "done" && bulkFailedCount > 0 && (
+                <p className="stream-row__error" style={{ padding: "6px 14px 0" }}>
+                  {bulkFailedCount} file{bulkFailedCount > 1 ? "s" : ""} couldn't be extracted — see the rows
+                  marked below.
+                </p>
+              )}
 
               <div className="stream-table__body">
                 {rows.length === 0 ? (
@@ -209,9 +275,13 @@ export default function ArchiveExtractor({ onHome }) {
                           {r.status === "extracting" ? (
                             <span className="stream-row__pct">…</span>
                           ) : r.status === "done" ? (
-                            <button className="stream-row__link" onClick={() => handleDownloadOne(r.name)}>
-                              Download
-                            </button>
+                            bulkSavedToFolder ? (
+                              <span className="stream-row__pct">saved ✓</span>
+                            ) : (
+                              <button className="stream-row__link" onClick={() => handleDownloadOne(r.name)}>
+                                Download
+                              </button>
+                            )
                           ) : (
                             <button
                               className="stream-row__link"
