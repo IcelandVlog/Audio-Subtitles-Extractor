@@ -57,6 +57,14 @@ const SUBTITLE_TEXT_CODECS = new Set([
   "text",
 ]);
 
+// Applied before -i on every extraction call (not the initial probe, which
+// needs a real full analysis to report accurate stream/duration info). We
+// already know the exact streams/codecs from that probe, so there's nothing
+// left to discover here — this just stops ffmpeg from redundantly re-scanning
+// bitstream data on every subsequent exec() to "double check" duration/codec
+// details it doesn't need for a straight stream copy.
+const FAST_OPEN_ARGS = ["-probesize", "5000000", "-analyzeduration", "0"];
+
 /** Extension we'll produce for a subtitle stream, without actually running ffmpeg. */
 export function guessSubtitleExtension(codec) {
   return SUBTITLE_TEXT_CODECS.has(codec) ? "srt" : "ass";
@@ -213,6 +221,7 @@ export function extractAudioNative({ inputName, streamIndex, codec, onProgress }
     ffmpeg.on("progress", progressHandler);
     try {
       await ffmpeg.exec([
+        ...FAST_OPEN_ARGS,
         "-i",
         inputName,
         "-map",
@@ -283,6 +292,7 @@ export function extractAudioNativeBatch({ inputName, streams, onProgress }) {
     for (const o of outputs) {
       args.push("-map", `0:${o.streamIndex}`, "-c:a", "copy", o.outputName);
     }
+    args.unshift(...FAST_OPEN_ARGS);
 
     const progressHandler = ({ progress }) => {
       if (onProgress && Number.isFinite(progress)) onProgress(Math.min(Math.max(progress, 0), 1));
@@ -329,6 +339,7 @@ export function extractSubtitleBatch({ inputName, streams, onProgress }) {
       group.forEach((s, i) => {
         args.push("-map", `0:${s.streamIndex}`, ...codecArgs, outNames[i]);
       });
+      args.unshift(...FAST_OPEN_ARGS);
 
       ffmpeg.on("progress", progressHandler);
       try {
@@ -384,7 +395,7 @@ export function extractAudio({ inputName, streamIndex, format, onProgress }) {
     };
     ffmpeg.on("progress", progressHandler);
     try {
-      await ffmpeg.exec(["-i", inputName, ...mapArgs, "-vn", ...encoderArgs, outputName]);
+      await ffmpeg.exec([...FAST_OPEN_ARGS, "-i", inputName, ...mapArgs, "-vn", ...encoderArgs, outputName]);
     } finally {
       ffmpeg.off("progress", progressHandler);
     }
@@ -410,7 +421,7 @@ export function extractSubtitle({ inputName, streamIndex, codec, onProgress }) {
       if (isText) {
         const outputName = `subs_${streamIndex}.srt`;
         try {
-          await ffmpeg.exec(["-i", inputName, "-map", `0:${streamIndex}`, "-c:s", "srt", outputName]);
+          await ffmpeg.exec([...FAST_OPEN_ARGS, "-i", inputName, "-map", `0:${streamIndex}`, "-c:s", "srt", outputName]);
           const data = await ffmpeg.readFile(outputName);
           await ffmpeg.deleteFile(outputName);
           return { blob: new Blob([data.buffer], { type: "text/srt" }), extension: "srt" };
@@ -421,7 +432,7 @@ export function extractSubtitle({ inputName, streamIndex, codec, onProgress }) {
 
       // Bitmap or otherwise inconvertible subtitle: copy the stream as-is.
       const outputName = `subs_${streamIndex}.ass`;
-      await ffmpeg.exec(["-i", inputName, "-map", `0:${streamIndex}`, "-c:s", "copy", outputName]);
+      await ffmpeg.exec([...FAST_OPEN_ARGS, "-i", inputName, "-map", `0:${streamIndex}`, "-c:s", "copy", outputName]);
       const data = await ffmpeg.readFile(outputName);
       await ffmpeg.deleteFile(outputName);
       return { blob: new Blob([data.buffer]), extension: "ass" };
