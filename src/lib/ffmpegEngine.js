@@ -89,13 +89,31 @@ function parseProbeLog(log) {
   return { streams, duration };
 }
 
+// Mounting via WORKERFS (below) hands ffmpeg the real File object instead of
+// a full in-memory copy, so large inputs are read lazily in byte ranges as
+// ffmpeg needs them rather than being duplicated wholesale into the wasm
+// heap. That's what lets files well past the ~2GB wasm memory ceiling be
+// probed/extracted at all — the whole video is never resident in memory at
+// once, only whatever chunk is currently being read.
+let mountCounter = 0;
+
+async function mountInputFile(ffmpeg, file) {
+  const mountPoint = `/in_${++mountCounter}`;
+  await ffmpeg.createDir(mountPoint);
+  await ffmpeg.mount("WORKERFS", { files: [file] }, mountPoint);
+  // WORKERFS exposes the file under its own original name inside the mount —
+  // it can't be renamed, so the ffmpeg input path has to match it exactly.
+  return `${mountPoint}/${file.name}`;
+}
+
 /** Run `ffmpeg -i` (which always "fails" with no output) purely to read its stream report. */
 export function probeFile(file, { onProgress, onUploaded } = {}) {
   return runExclusive(async () => {
     const ffmpeg = await loadEngine();
-    const inputName = safeName(file.name);
-    const data = await readFileWithProgress(file, onProgress);
-    await ffmpeg.writeFile(inputName, data);
+    const inputName = await mountInputFile(ffmpeg, file);
+    // No bulk read happens anymore, so there's no real byte-progress phase —
+    // report done immediately and move straight to probing.
+    onProgress?.(1);
     onUploaded?.();
 
     let log = "";
@@ -113,25 +131,6 @@ export function probeFile(file, { onProgress, onUploaded } = {}) {
 
     const info = parseProbeLog(log);
     return { inputName, ...info };
-  });
-}
-
-function safeName(name) {
-  return name.replace(/[^a-zA-Z0-9._-]/g, "_");
-}
-
-/** Read a File into memory while reporting real byte-level progress (0..1). */
-function readFileWithProgress(file, onProgress) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onprogress = (e) => {
-      if (onProgress && e.lengthComputable) {
-        onProgress(e.loaded / e.total);
-      }
-    };
-    reader.onload = () => resolve(new Uint8Array(reader.result));
-    reader.onerror = () => reject(reader.error || new Error("Couldn't read this file."));
-    reader.readAsArrayBuffer(file);
   });
 }
 
@@ -326,8 +325,16 @@ export function extractSubtitle({ inputName, streamIndex, codec, onProgress }) {
 
 export async function cleanupInput(inputName) {
   if (!ffmpegInstance) return;
+  // inputName is "<mountPoint>/<original file name>" (see mountInputFile) —
+  // unmount and remove the mount directory itself, not a MEMFS file.
+  const mountPoint = inputName.slice(0, inputName.lastIndexOf("/"));
   try {
-    await ffmpegInstance.deleteFile(inputName);
+    await ffmpegInstance.unmount(mountPoint);
+  } catch {
+    // already unmounted, ignore
+  }
+  try {
+    await ffmpegInstance.deleteDir(mountPoint);
   } catch {
     // already gone, ignore
   }

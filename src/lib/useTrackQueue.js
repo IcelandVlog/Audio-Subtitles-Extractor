@@ -207,8 +207,10 @@ export function useTrackQueue() {
             audioStreams,
             subtitleStreams,
           });
-        } catch {
-          patchTrack(t.id, { status: "error", error: "Couldn't read this file." });
+        } catch (err) {
+          console.error("[probe] failed:", err);
+          const detail = err?.message ? `: ${err.message}` : "";
+          patchTrack(t.id, { status: "error", error: `Couldn't read this file${detail}` });
         }
       }
     },
