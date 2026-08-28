@@ -96,7 +96,7 @@ export default function StreamTable({
                 <select
                   className="stream-row__format"
                   value={s.format}
-                  disabled={disabled || s.status === "extracting"}
+                  disabled={disabled || allRunning || s.status === "extracting"}
                   onChange={(e) => onSetFormat(s.index, e.target.value)}
                 >
                   {AUDIO_FORMATS.map((f) => (
@@ -122,9 +122,14 @@ export default function StreamTable({
                     </button>
                   </>
                 ) : (
+                  // While "Extract all" is running, every row that isn't the
+                  // one currently being processed stays on this idle "Extract"
+                  // button, just disabled — no stale "0%" on rows that haven't
+                  // had their turn yet, and no way to kick off a second
+                  // extraction on top of the running one.
                   <button
                     className="stream-row__link"
-                    disabled={disabled}
+                    disabled={disabled || allRunning}
                     onClick={() => onExtractOne(s.index)}
                   >
                     Extract

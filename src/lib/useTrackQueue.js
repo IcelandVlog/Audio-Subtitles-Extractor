@@ -389,18 +389,20 @@ export function useTrackQueue() {
         return candidate;
       };
 
-      list.forEach((stream) =>
-        patchStream(trackId, kind, stream.index, { status: "extracting", progress: 0, error: null })
-      );
-
       try {
         // Streams are extracted one at a time (own ffmpeg pass each), not
         // batched into a single multi-map command, so progress reflects the
         // stream actually being worked on and one bad stream can't abort the
-        // rest of the set.
+        // rest of the set. Only the stream currently being processed is
+        // marked "extracting" (right before its own turn) — the rest stay
+        // "idle" and their row stays disabled via the track's overall
+        // audioAllStatus/subsAllStatus ("extracting") until this loop ends,
+        // so the UI shows a single live percentage instead of every row
+        // sitting at 0%.
         for (let i = 0; i < list.length; i++) {
           const stream = list[i];
           const langTag = stream.language && stream.language !== "und" ? `.${stream.language}` : "";
+          patchStream(trackId, kind, stream.index, { status: "extracting", progress: 0, error: null });
           try {
             if (kind === "audio") {
               let native = stream.native;
