@@ -93,7 +93,7 @@ export default function App() {
         <div className="nav__right">
           <a
             className="nav__link"
-            href="https://github.com/Bisalkumar/Audio-Extractor"
+            href="https://github.com/IcelandVlog/Audio-Subtitles-Extractor.git"
             target="_blank"
             rel="noreferrer"
           >
