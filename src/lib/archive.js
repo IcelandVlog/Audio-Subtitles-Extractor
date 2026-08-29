@@ -196,15 +196,36 @@ async function localDataRange(file, entry) {
 // decompresses through the browser's native streaming inflate. Peak memory
 // for a stored entry is effectively zero; for a deflated entry it's bounded
 // by that one entry's decompressed size, never the whole archive.
-async function extractZipEntry(file, entry) {
+// Wraps a byte stream in a pass-through TransformStream that reports
+// cumulative bytes read against the entry's known uncompressed size — this
+// is how single-file extraction gets a live percentage instead of a spinner.
+function withProgress(stream, total, onProgress) {
+  if (!onProgress || !total) return stream;
+  let read = 0;
+  const tracker = new TransformStream({
+    transform(chunk, controller) {
+      read += chunk.byteLength;
+      onProgress(Math.min(1, read / total));
+      controller.enqueue(chunk);
+    },
+  });
+  return stream.pipeThrough(tracker);
+}
+
+async function extractZipEntry(file, entry, onProgress) {
   const { start, end } = await localDataRange(file, entry);
   const slice = file.slice(start, end);
-  if (entry.method === 0) return slice; // stored — already the raw content
+  if (entry.method === 0) {
+    // stored — already the raw content, but still stream it through the
+    // tracker when progress is requested so large stored entries report too
+    if (!onProgress) return slice;
+    return new Response(withProgress(slice.stream(), entry.size, onProgress)).blob();
+  }
   if (entry.method !== 8) {
     throw new Error(`"${entry.name}" uses an unsupported compression method (${entry.method}).`);
   }
   const decompressed = slice.stream().pipeThrough(new DecompressionStream("deflate-raw"));
-  return new Response(decompressed).blob();
+  return new Response(withProgress(decompressed, entry.size, onProgress)).blob();
 }
 
 function runPool(count, concurrency, task) {
@@ -226,10 +247,10 @@ async function openZipStreaming(file) {
     kind: "zip",
     sizeLimited: false,
     entries: entries.map((e) => ({ name: e.name, size: e.size })),
-    async extractOne(name) {
+    async extractOne(name, onProgress) {
       const entry = entries.find((e) => e.name === name);
       if (!entry) throw new Error("That file isn't in the archive.");
-      return extractZipEntry(file, entry);
+      return extractZipEntry(file, entry, onProgress);
     },
     async extractAll(onProgress) {
       const out = new Array(entries.length);
@@ -284,10 +305,10 @@ async function openZipLegacy(file) {
     kind: "zip",
     sizeLimited: true,
     entries,
-    async extractOne(name) {
+    async extractOne(name, onProgress) {
       const entry = zip.file(name);
       if (!entry) throw new Error("That file isn't in the archive.");
-      return entry.async("blob");
+      return entry.async("blob", onProgress ? (meta) => onProgress(meta.percent / 100) : undefined);
     },
     async extractAll(onProgress) {
       const names = entries.map((e) => e.name);
@@ -389,6 +410,9 @@ async function openRar(file) {
     kind: "rar",
     sizeLimited: true, // bounded by available memory — a real RAR-format/library constraint
     entries,
+    // node-unrar-js extracts synchronously with no byte-level callback, so
+    // there's no real progress to report here — the UI falls back to a
+    // spinner for .rar single-file extraction instead of a percentage.
     async extractOne(name) {
       const { files } = extractor.extract({ files: [name] });
       const first = [...files][0];

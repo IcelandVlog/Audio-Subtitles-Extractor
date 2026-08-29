@@ -58,9 +58,9 @@ export default function ArchiveExtractor({ onHome }) {
   };
 
   const handleExtractOne = async (name) => {
-    patchRow(name, { status: "extracting", error: null });
+    patchRow(name, { status: "extracting", error: null, progress: 0 });
     try {
-      const blob = await archiveRef.current.extractOne(name);
+      const blob = await archiveRef.current.extractOne(name, (frac) => patchRow(name, { progress: frac }));
       patchRow(name, { status: "done", blob });
     } catch (err) {
       patchRow(name, { status: "error", error: err?.message || "Extraction failed." });
@@ -273,7 +273,9 @@ export default function ArchiveExtractor({ onHome }) {
                         </div>
                         <div className="stream-row__action">
                           {r.status === "extracting" ? (
-                            <span className="stream-row__pct">…</span>
+                            <span className="stream-row__pct">
+                              {archive?.kind === "zip" ? `${Math.round((r.progress || 0) * 100)}%` : "…"}
+                            </span>
                           ) : r.status === "done" ? (
                             bulkSavedToFolder ? (
                               <span className="stream-row__pct">saved ✓</span>
