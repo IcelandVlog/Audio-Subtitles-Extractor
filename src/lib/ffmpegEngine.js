@@ -64,9 +64,26 @@ const SUBTITLE_TEXT_CODECS = new Set([
 // outright, in case a *safe* version of this optimization is worth revisiting.
 const FAST_OPEN_ARGS = [];
 
+// Bitmap/image-based subtitle codecs each need their own real container —
+// dumping any of them into an ".ass" file (like this used to) puts a
+// non-ASS bitstream inside a muxer meant for SSA/ASS text, which is exactly
+// why a PGS (.sup) track was coming out mislabeled as .ass. Route each known
+// codec to the container ffmpeg can actually mux it into; anything we don't
+// specifically recognize falls back to Matroska (.mks), the one container
+// that can always take a stream-copied subtitle regardless of codec.
+const BITMAP_SUBTITLE_FORMATS = {
+  hdmv_pgs_subtitle: { extension: "sup", format: null }, // ffmpeg guesses the "sup" muxer from the extension
+  pgssub: { extension: "sup", format: null },
+};
+const DEFAULT_BITMAP_FORMAT = { extension: "mks", format: "matroska" }; // .mks needs an explicit -f, ffmpeg can't guess it from the extension
+
+function bitmapSubtitleFormat(codec) {
+  return BITMAP_SUBTITLE_FORMATS[codec] || DEFAULT_BITMAP_FORMAT;
+}
+
 /** Extension we'll produce for a subtitle stream, without actually running ffmpeg. */
 export function guessSubtitleExtension(codec) {
-  return SUBTITLE_TEXT_CODECS.has(codec) ? "srt" : "ass";
+  return SUBTITLE_TEXT_CODECS.has(codec) ? "srt" : bitmapSubtitleFormat(codec).extension;
 }
 
 /** Parse ffprobe/ffmpeg -i stderr output into stream + duration info. */
@@ -364,12 +381,14 @@ export function extractSubtitleBatch({ inputName, streams, onProgress }) {
       if (onProgress && Number.isFinite(progress)) onProgress(Math.min(Math.max(progress, 0), 1));
     };
 
-    const runGroup = async (group, codecArgs, extension, mimeType) => {
+    const runGroup = async (group, codecArgs, extension, mimeType, format) => {
       if (group.length === 0) return;
       const outNames = group.map((s) => `subs_${s.streamIndex}.${extension}`);
       const args = ["-i", inputName];
       group.forEach((s, i) => {
-        args.push("-map", `0:${s.streamIndex}`, ...codecArgs, outNames[i]);
+        args.push("-map", `0:${s.streamIndex}`, ...codecArgs);
+        if (format) args.push("-f", format);
+        args.push(outNames[i]);
       });
       args.unshift(...FAST_OPEN_ARGS);
 
@@ -408,7 +427,19 @@ export function extractSubtitleBatch({ inputName, streams, onProgress }) {
       }
     }
 
-    await runGroup(bitmapStreams, ["-c:s", "copy"], "ass");
+    // Bitmap streams don't all belong in the same container — PGS goes to
+    // .sup, everything else falls back to .mks — so split into sub-groups
+    // by target format before running each through ffmpeg.
+    const bitmapGroups = new Map();
+    for (const s of bitmapStreams) {
+      const fmt = bitmapSubtitleFormat(s.codec);
+      const key = `${fmt.extension}|${fmt.format}`;
+      if (!bitmapGroups.has(key)) bitmapGroups.set(key, { ...fmt, streams: [] });
+      bitmapGroups.get(key).streams.push(s);
+    }
+    for (const { extension, format, streams: group } of bitmapGroups.values()) {
+      await runGroup(group, ["-c:s", "copy"], extension, undefined, format);
+    }
 
     return results;
   });
@@ -462,12 +493,17 @@ export function extractSubtitle({ inputName, streamIndex, codec, onProgress }) {
         }
       }
 
-      // Bitmap or otherwise inconvertible subtitle: copy the stream as-is.
-      const outputName = `subs_${streamIndex}.ass`;
-      await ffmpeg.exec([...FAST_OPEN_ARGS, "-i", inputName, "-map", `0:${streamIndex}`, "-c:s", "copy", outputName]);
+      // Bitmap or otherwise inconvertible subtitle: copy the stream as-is,
+      // into whichever container that codec actually belongs in (e.g. PGS -> .sup).
+      const { extension, format } = bitmapSubtitleFormat(codec);
+      const outputName = `subs_${streamIndex}.${extension}`;
+      const execArgs = [...FAST_OPEN_ARGS, "-i", inputName, "-map", `0:${streamIndex}`, "-c:s", "copy"];
+      if (format) execArgs.push("-f", format);
+      execArgs.push(outputName);
+      await ffmpeg.exec(execArgs);
       const data = await ffmpeg.readFile(outputName);
       await ffmpeg.deleteFile(outputName);
-      return { blob: new Blob([data.buffer]), extension: "ass" };
+      return { blob: new Blob([data.buffer]), extension };
     } finally {
       ffmpeg.off("progress", progressHandler);
     }
