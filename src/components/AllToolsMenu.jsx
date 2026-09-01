@@ -44,6 +44,7 @@ const CATEGORIES = [
       { id: "color-changer", label: "Color changer" },
       { id: "position-changer", label: "Position changer" },
       { id: "make-pinyin-subtitles", label: "Make Pinyin Subtitles" },
+      { id: "compress-audio", label: "Audio Compressor", badge: "New!" },
     ],
   },
 ];

@@ -13,6 +13,7 @@ import { parsePgs } from "./pgs";
 import { parseVobsub } from "./vobsub";
 import { ocrFramesToCues } from "./ocr";
 import { cuesToPinyin } from "./pinyin";
+import { compressAudio } from "../ffmpegEngine";
 
 const OCR_LANG_FIELD = {
   key: "lang",
@@ -78,6 +79,9 @@ export const TOOLS = {
     accept: ".sup",
     fields: [OCR_LANG_FIELD],
     beta: true,
+    showPercent: true,
+    progressLabel: "Running OCR",
+    progressSuffix: "this can take a minute",
     hint: "PGS/Blu-ray bitmap subtitles (.sup). Runs OCR in your browser — larger files take a while, and accuracy depends on image quality.",
     async run([file], options, onProgress) {
       const buf = await file.arrayBuffer();
@@ -97,6 +101,9 @@ export const TOOLS = {
     needsPair: true,
     fields: [OCR_LANG_FIELD],
     beta: true,
+    showPercent: true,
+    progressLabel: "Running OCR",
+    progressSuffix: "this can take a minute",
     hint: "DVD VobSub subtitles — upload both the .idx and the .sub file together. Runs OCR in your browser.",
     async run(files, options, onProgress) {
       const idxFile = files.find((f) => f.name.toLowerCase().endsWith(".idx"));
@@ -342,6 +349,45 @@ export const TOOLS = {
         tone: options.tone || "marks",
       });
       return download(`${baseName(file.name)}.pinyin.srt`, toSrtText(converted), "text/plain");
+    },
+  },
+
+  "compress-audio": {
+    label: "Audio Compressor",
+    category: "other",
+    accept: ".mp3,.wav,.aac,.m4a,.ogg,.flac,.wma",
+    fields: [
+      {
+        key: "format",
+        label: "Output format",
+        type: "select",
+        options: [
+          { value: "mp3", label: "MP3 (most compatible)" },
+          { value: "aac", label: "AAC" },
+          { value: "ogg", label: "OGG (Vorbis)" },
+        ],
+        default: "mp3",
+      },
+      {
+        key: "quality",
+        label: "Quality",
+        type: "select",
+        options: [
+          { value: "high", label: "High quality (smallest size cut)" },
+          { value: "medium", label: "Balanced (recommended)" },
+          { value: "small", label: "Smallest file (more quality loss)" },
+        ],
+        default: "medium",
+      },
+    ],
+    showPercent: true,
+    progressLabel: "Compressing",
+    hint: "Re-encodes your audio at a lower bitrate to shrink the file size while keeping it sounding as close to the original as your chosen quality allows. Runs entirely in your browser — the file never leaves your machine.",
+    async run([file], options, onProgress) {
+      const format = options.format || "mp3";
+      const quality = options.quality || "medium";
+      const { blob, extension } = await compressAudio({ file, format, quality, onProgress });
+      return download(`${baseName(file.name)}.compressed.${extension}`, blob, blob.type);
     },
   },
 };

@@ -469,6 +469,87 @@ export function extractAudio({ inputName, streamIndex, format, onProgress }) {
   });
 }
 
+// Bitrate/VBR targets per quality tier, tuned per encoder so each tier gives
+// a real, noticeable size reduction while staying listenable — "high" trims
+// the least, "small" trims the most. These are lossy re-encodes, so a little
+// quality is always traded for size; the tiers just control how much.
+const COMPRESS_ENCODERS = {
+  mp3: {
+    codec: "libmp3lame",
+    high: ["-q:a", "2"], // ~170-210 kbps VBR
+    medium: ["-q:a", "5"], // ~120-150 kbps VBR
+    small: ["-q:a", "8"], // ~70-105 kbps VBR
+  },
+  aac: {
+    codec: "aac",
+    high: ["-b:a", "192k"],
+    medium: ["-b:a", "128k"],
+    small: ["-b:a", "64k"],
+  },
+  ogg: {
+    codec: "libvorbis",
+    high: ["-q:a", "6"], // ~192 kbps
+    medium: ["-q:a", "4"], // ~128-160 kbps
+    small: ["-q:a", "2"], // ~96 kbps
+  },
+};
+
+/**
+ * Re-encode a standalone audio file (not pulled from a video — a plain
+ * upload) at a lower bitrate/VBR quality so it takes up less space. Channel
+ * layout and sample rate are left as ffmpeg's defaults for the chosen
+ * codec — only the bitrate/quality target changes, which is what actually
+ * drives file size down while keeping the result close to the original.
+ */
+export function compressAudio({ file, format = "mp3", quality = "medium", onProgress }) {
+  return runExclusive(async () => {
+    const ffmpeg = await loadEngine();
+
+    let inputName;
+    if (file.size <= MEMFS_SAFE_BYTES) {
+      inputName = safeName(file.name) || `input_${Date.now()}`;
+      // Upload-into-memory has no meaningful "encode progress" of its own —
+      // reporting it through the same onProgress that the encode step below
+      // uses would make the bar jump back down to 0% right as encoding
+      // starts, which is exactly the jitter fixed elsewhere. So this step
+      // stays silent; only the actual encode reports progress.
+      const data = await readFileWithProgress(file);
+      await ffmpeg.writeFile(inputName, data);
+    } else {
+      inputName = await mountInputFile(ffmpeg, file);
+    }
+
+    const preset = COMPRESS_ENCODERS[format] || COMPRESS_ENCODERS.mp3;
+    const qualityArgs = preset[quality] || preset.medium;
+    const outputName = `compressed_${Date.now()}.${format}`;
+
+    const progressHandler = ({ progress }) => {
+      if (onProgress && Number.isFinite(progress)) onProgress(Math.min(Math.max(progress, 0), 1));
+    };
+    ffmpeg.on("progress", progressHandler);
+    try {
+      await ffmpeg.exec([
+        ...FAST_OPEN_ARGS,
+        "-i",
+        inputName,
+        "-vn",
+        "-c:a",
+        preset.codec,
+        ...qualityArgs,
+        outputName,
+      ]);
+    } finally {
+      ffmpeg.off("progress", progressHandler);
+    }
+
+    const data = await ffmpeg.readFile(outputName);
+    await ffmpeg.deleteFile(outputName).catch(() => {});
+    await cleanupInput(inputName);
+
+    return { blob: new Blob([data.buffer], { type: `audio/${format}` }), extension: format };
+  });
+}
+
 /** Extract a subtitle stream. Tries to convert to .srt; falls back to its native container. */
 export function extractSubtitle({ inputName, streamIndex, codec, onProgress }) {
   return runExclusive(async () => {
