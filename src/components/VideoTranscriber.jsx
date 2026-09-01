@@ -30,6 +30,7 @@ export default function VideoTranscriber({ onHome }) {
   const [cues, setCues] = useState(null);
   const [hadSubtitles, setHadSubtitles] = useState(false);
   const [durationS, setDurationS] = useState(null);
+  const [detectedLanguage, setDetectedLanguage] = useState(null); // { code, label, confidence } | null
   const inputRef = useRef(null);
 
   const busy = stage !== "idle" && stage !== "done" && stage !== "error";
@@ -41,12 +42,14 @@ export default function VideoTranscriber({ onHome }) {
     setCues(null);
     setError("");
     setHadSubtitles(false);
+    setDetectedLanguage(null);
   };
 
   const handleRun = async () => {
     if (!file) return;
     setError("");
     setCues(null);
+    setDetectedLanguage(null);
     let inputName = null;
     try {
       setStage("probing");
@@ -89,6 +92,14 @@ export default function VideoTranscriber({ onHome }) {
           setStage("transcribing");
           setProgress(p);
         },
+        onLanguageDetected: (detected) => {
+          const match = TRANSCRIBE_LANGUAGES.find((l) => l.value === detected.code);
+          setDetectedLanguage({
+            code: detected.code,
+            label: match?.label || detected.code,
+            confidence: detected.confidence,
+          });
+        },
       });
 
       setProgress(1);
@@ -104,12 +115,20 @@ export default function VideoTranscriber({ onHome }) {
 
   const baseName = file ? stripExt(file.name) : "transcript";
 
+  // The language actually used for this transcription: whatever was picked
+  // explicitly, or what auto-detect landed on. Used to tag subtitle
+  // filenames the way media players (Plex, Jellyfin, Kodi, VLC, ...) expect —
+  // movie.en.srt, movie.bn.srt — so they pick up the track's language
+  // automatically instead of it showing up as "Unknown".
+  const langCode = language !== "auto" ? language : detectedLanguage?.code || null;
+  const subtitleBaseName = langCode ? `${baseName}.${langCode}` : baseName;
+
   const handleDownload = (kind) => {
     if (!cues) return;
     if (kind === "srt") {
-      downloadBlob(new Blob([toSrtText(cues)], { type: "text/plain" }), `${baseName}.srt`);
+      downloadBlob(new Blob([toSrtText(cues)], { type: "text/plain" }), `${subtitleBaseName}.srt`);
     } else if (kind === "vtt") {
-      downloadBlob(new Blob([toVttText(cues)], { type: "text/vtt" }), `${baseName}.vtt`);
+      downloadBlob(new Blob([toVttText(cues)], { type: "text/vtt" }), `${subtitleBaseName}.vtt`);
     } else if (kind === "txt") {
       downloadBlob(new Blob([cuesToPlainText(cues)], { type: "text/plain" }), `${baseName}.txt`);
     } else if (kind === "pdf") {
@@ -222,6 +241,17 @@ export default function VideoTranscriber({ onHome }) {
 
         {stage === "done" && cues && (
           <>
+            {detectedLanguage && (
+              <p className="tool-page__hint">
+                Detected language: {detectedLanguage.label} ({detectedLanguage.code})
+                {detectedLanguage.confidence != null
+                  ? ` · ${Math.round(detectedLanguage.confidence * 100)}% confidence`
+                  : ""}
+                . The .srt/.vtt downloads below are tagged{" "}
+                <code>.{detectedLanguage.code}.</code> so players like Plex, Jellyfin, or VLC pick up
+                the language automatically.
+              </p>
+            )}
             <div className="lyrics-editor__list" style={{ marginTop: 8 }}>
               {cues.map((c, i) => (
                 <div key={i} className="lyrics-row lyrics-row--transcript">

@@ -243,12 +243,15 @@ export default function ToolPage({ toolId, onHome }) {
         {status === "error" && <p className="tool-modal__error">{error}</p>}
 
         {status === "done" && result && (
-          <div className="tool-modal__result">
-            <span>Done — {result.filename}</span>
-            <button type="button" className="tool-modal__download" onClick={handleDownload}>
-              Download
-            </button>
-          </div>
+          <>
+            {result.note && <p className="tool-page__hint">{result.note}</p>}
+            <div className="tool-modal__result">
+              <span>Done — {result.filename}</span>
+              <button type="button" className="tool-modal__download" onClick={handleDownload}>
+                Download
+              </button>
+            </div>
+          </>
         )}
 
         <div className="tool-modal__actions">

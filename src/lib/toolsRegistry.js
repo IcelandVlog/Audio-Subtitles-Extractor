@@ -38,6 +38,8 @@ export const TOOL_CATEGORIES = [
     tools: [
       { id: "merger", label: "Subtitle Merger", route: "merger" },
       { id: "extract", label: "Extract Subtitles from Video", route: "/", badge: "New!" },
+      { id: "video-to-subtitles", label: "Video to Subtitle Converter", route: "video-to-subtitles", badge: "New!" },
+      { id: "detect-language", label: "Subtitle Language Detector", route: "detect-language", badge: "New!" },
       { id: "lyrics-editor", label: "Timed Lyrics Editor", route: "lyrics-editor", badge: "New!" },
       { id: "color-changer", label: "Color changer", route: "color-changer" },
       { id: "position-changer", label: "Position changer", route: "position-changer" },

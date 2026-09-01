@@ -13,6 +13,7 @@ import { parsePgs } from "./pgs";
 import { parseVobsub } from "./vobsub";
 import { ocrFramesToCues } from "./ocr";
 import { cuesToPinyin } from "./pinyin";
+import { detectSubtitleLanguage } from "./langDetect";
 import { compressAudio } from "../ffmpegEngine";
 
 const OCR_LANG_FIELD = {
@@ -261,6 +262,34 @@ export const TOOLS = {
           ? mergeCues(parsed[0], parsed[1], "dual", gapMs)
           : mergeCuesSequential(parsed, gapMs);
       return download(`${baseName(files[0].name)}.merged.srt`, toSrtText(merged), "text/plain");
+    },
+  },
+
+  "detect-language": {
+    label: "Subtitle Language Detector",
+    category: "other",
+    accept: ".srt,.vtt,.ass,.ssa,.sbv",
+    fields: [],
+    hint: "Reads the dialogue text and identifies which of 150+ languages it's written in — no audio needed. The file comes back unchanged except for a language-code tag in the filename (movie.bn.srt, movie.en.srt, ...) so players like Plex, Jellyfin, Kodi, and VLC pick up the language automatically.",
+    async run([file]) {
+      const text = await readText(file);
+      const { cues, format } = parseAny(file.name, text);
+      const detected = detectSubtitleLanguage(cuesToPlainText(cues));
+      const isVtt = format === "vtt";
+      const ext = isVtt ? "vtt" : "srt";
+      const body = isVtt ? toVttText(cues) : toSrtText(cues);
+
+      if (!detected) {
+        const out = download(`${baseName(file.name)}.${ext}`, body, "text/plain");
+        out.note = "Couldn't confidently identify the language — there may not be enough dialogue text to go on.";
+        return out;
+      }
+
+      const out = download(`${baseName(file.name)}.${detected.code}.${ext}`, body, "text/plain");
+      out.note = `Detected language: ${detected.label} (${detected.code}) · ${Math.round(
+        detected.confidence * 100
+      )}% confidence`;
+      return out;
     },
   },
 
