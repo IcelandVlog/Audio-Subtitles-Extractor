@@ -657,10 +657,30 @@
   color: var(--text-muted);
 }
 
+.lang-picker__scroll {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.lang-picker__section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px 0;
+}
+
+.lang-picker__section-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
 .lang-picker__toolbar {
   display: flex;
   gap: 14px;
-  padding: 12px 20px 0;
   flex-shrink: 0;
 }
 
@@ -681,9 +701,7 @@
 .lang-picker__list {
   list-style: none;
   margin: 0;
-  padding: 10px 20px;
-  overflow-y: auto;
-  flex: 1;
+  padding: 6px 20px 10px;
 }
 
 .lang-picker__row {

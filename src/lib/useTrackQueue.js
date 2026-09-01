@@ -597,11 +597,15 @@ export function useTrackQueue() {
   // languages…" picker on the queue toolbar — one click extracts + bundles
   // only the languages the user actually wants, across the whole queue.
   const extractByLanguageForQueue = useCallback(
-    async (kind, selectedCodes) => {
+    async (kind, selectedCodes, selectedFileIds) => {
       const codes = new Set(selectedCodes);
+      // no fileIds passed (or falsy) means "every file" — keeps the function
+      // usable without the file filter for callers that don't need it
+      const fileIds = selectedFileIds ? new Set(selectedFileIds) : null;
       const tracksAtStart = tracksRef.current;
       const entries = [];
       for (const track of tracksAtStart) {
+        if (fileIds && !fileIds.has(track.id)) continue;
         const list = kind === "audio" ? track.audioStreams : track.subtitleStreams;
         for (const stream of list) {
           if (codes.has(stream.language || "und")) {
@@ -687,11 +691,11 @@ export function useTrackQueue() {
   );
 
   const extractAudioByLanguageQueue = useCallback(
-    (codes) => extractByLanguageForQueue("audio", codes),
+    (codes, fileIds) => extractByLanguageForQueue("audio", codes, fileIds),
     [extractByLanguageForQueue]
   );
   const extractSubtitlesByLanguageQueue = useCallback(
-    (codes) => extractByLanguageForQueue("subtitle", codes),
+    (codes, fileIds) => extractByLanguageForQueue("subtitle", codes, fileIds),
     [extractByLanguageForQueue]
   );
 

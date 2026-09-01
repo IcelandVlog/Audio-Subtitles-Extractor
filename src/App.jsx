@@ -217,10 +217,13 @@ export default function App() {
         <LanguageTargetPicker
           kind={langPickerKind}
           options={langPickerKind === "audio" ? audioLanguageOptions : subtitleLanguageOptions}
+          files={tracks
+            .filter((t) => t.status === "ready")
+            .map((t) => ({ id: t.id, name: t.name }))}
           onCancel={() => setLangPickerKind(null)}
-          onConfirm={(codes) => {
-            if (langPickerKind === "audio") extractAudioByLanguageQueue(codes);
-            else extractSubtitlesByLanguageQueue(codes);
+          onConfirm={(codes, fileIds) => {
+            if (langPickerKind === "audio") extractAudioByLanguageQueue(codes, fileIds);
+            else extractSubtitlesByLanguageQueue(codes, fileIds);
             setLangPickerKind(null);
           }}
         />
