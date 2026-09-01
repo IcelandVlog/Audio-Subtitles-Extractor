@@ -7,6 +7,7 @@ import TrackCard from "./components/TrackCard";
 import AllToolsMenu from "./components/AllToolsMenu";
 import ToolPage from "./components/ToolPage";
 import LyricsEditor from "./components/LyricsEditor";
+import LanguageTargetPicker from "./components/LanguageTargetPicker";
 import "./App.css";
 
 // Pulls in @huggingface/transformers + onnxruntime-web (large) — only fetched
@@ -48,15 +49,18 @@ export default function App() {
     downloadAllSubtitles,
     queueAudioAllStatus,
     queueAudioAllProgress,
-    extractAllAudioQueue,
     downloadAllAudioQueue,
-    queueAudioExtractedCount,
     queueSubsAllStatus,
     queueSubsAllProgress,
-    extractAllSubtitlesQueue,
     downloadAllSubtitlesQueue,
-    queueSubsExtractedCount,
+    audioLanguageOptions,
+    subtitleLanguageOptions,
+    extractAudioByLanguageQueue,
+    extractSubtitlesByLanguageQueue,
   } = useTrackQueue();
+
+  // Which "target languages" picker (if any) is open — null | "audio" | "subtitle"
+  const [langPickerKind, setLangPickerKind] = useState(null);
 
   const anyBusy = tracks.some(
     (t) =>
@@ -170,18 +174,18 @@ export default function App() {
                     label="All audio"
                     status={queueAudioAllStatus}
                     progress={queueAudioAllProgress}
-                    extractedCount={queueAudioExtractedCount}
-                    disabled={anyBusy || queueAudioExtractedCount === 0}
-                    onExtract={extractAllAudioQueue}
+                    totalCount={audioLanguageOptions.reduce((n, o) => n + o.streamCount, 0)}
+                    disabled={anyBusy || audioLanguageOptions.length === 0}
+                    onPickLanguages={() => setLangPickerKind("audio")}
                     onDownload={downloadAllAudioQueue}
                   />
                   <QueueBulkAction
                     label="All subtitles"
                     status={queueSubsAllStatus}
                     progress={queueSubsAllProgress}
-                    extractedCount={queueSubsExtractedCount}
-                    disabled={anyBusy || queueSubsExtractedCount === 0}
-                    onExtract={extractAllSubtitlesQueue}
+                    totalCount={subtitleLanguageOptions.reduce((n, o) => n + o.streamCount, 0)}
+                    disabled={anyBusy || subtitleLanguageOptions.length === 0}
+                    onPickLanguages={() => setLangPickerKind("subtitle")}
                     onDownload={downloadAllSubtitlesQueue}
                   />
                 </div>
@@ -209,6 +213,19 @@ export default function App() {
         </main>
       )}
 
+      {langPickerKind && (
+        <LanguageTargetPicker
+          kind={langPickerKind}
+          options={langPickerKind === "audio" ? audioLanguageOptions : subtitleLanguageOptions}
+          onCancel={() => setLangPickerKind(null)}
+          onConfirm={(codes) => {
+            if (langPickerKind === "audio") extractAudioByLanguageQueue(codes);
+            else extractSubtitlesByLanguageQueue(codes);
+            setLangPickerKind(null);
+          }}
+        />
+      )}
+
       <footer className="footer">
         <p>
           Built on <span className="mono">ffmpeg.wasm</span> — decoding happens on your CPU, in your
@@ -219,36 +236,45 @@ export default function App() {
   );
 }
 
-// One "bundle whatever I've already extracted by hand, across every file"
-// control for the queue toolbar. This never extracts anything new — it just
-// zips together the audio (or subtitle) tracks that already have a manual
-// per-track "Extract" done, wherever they came from in the queue. Audio and
-// subtitles each get their own instance, so the two stay separate zips.
-function QueueBulkAction({ label, status, progress, extractedCount, disabled, onExtract, onDownload }) {
+// One "pick target languages, then extract + bundle across every file" control
+// for the queue toolbar. Clicking it opens the LanguageTargetPicker; whatever
+// languages get confirmed there are extracted (any not already done get run
+// through ffmpeg, any already-extracted ones are reused) and zipped together
+// in one go. Audio and subtitles each get their own instance, so the two stay
+// separate zips.
+function QueueBulkAction({ label, status, progress, totalCount, disabled, onPickLanguages, onDownload }) {
   return (
     <div className="queue__bulk-item">
       <span className="queue__bulk-label">{label}</span>
       {status === "extracting" ? (
         <span className="queue__bulk-progress">{Math.round(progress * 100)}%</span>
       ) : status === "done" ? (
-        <button type="button" className="queue__bulk-btn" onClick={onDownload}>
-          Download zip ↓
-        </button>
+        <>
+          <button type="button" className="queue__bulk-btn" onClick={onDownload}>
+            Download zip ↓
+          </button>
+          <button
+            type="button"
+            className="queue__bulk-btn queue__bulk-btn--muted"
+            disabled={disabled}
+            onClick={onPickLanguages}
+          >
+            change…
+          </button>
+        </>
       ) : (
         <button
           type="button"
           className="queue__bulk-btn"
           disabled={disabled}
-          onClick={onExtract}
+          onClick={onPickLanguages}
           title={
-            extractedCount > 0
-              ? `Zip together the ${extractedCount} ${label.toLowerCase()} track${
-                  extractedCount > 1 ? "s" : ""
-                } you've already extracted`
-              : `Extract at least one ${label.toLowerCase().replace(/^all /, "")} track first, then bundle it here`
+            totalCount > 0
+              ? `Choose which ${label.toLowerCase().replace(/^all /, "")} languages to extract across every file`
+              : `No ${label.toLowerCase().replace(/^all /, "")} tracks found in the queue yet`
           }
         >
-          {extractedCount > 0 ? `Bundle extracted (${extractedCount})` : "Bundle extracted"}
+          Target languages…
         </button>
       )}
       {status === "error" && <span className="queue__bulk-error">failed</span>}

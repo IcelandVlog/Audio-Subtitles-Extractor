@@ -16,6 +16,33 @@ import { languageLabel } from "./languages";
 let idCounter = 0;
 const nextId = () => `track-${++idCounter}`;
 
+// Groups every audio/subtitle stream across the whole queue by language code,
+// for the "target languages" picker — one row per language with how many
+// streams and how many distinct files carry it, so the user can see what
+// they're about to pull before committing.
+function buildLanguageOptions(tracks, kind) {
+  const listKey = kind === "audio" ? "audioStreams" : "subtitleStreams";
+  const byCode = new Map();
+  for (const track of tracks) {
+    const seenInThisFile = new Set();
+    for (const stream of track[listKey]) {
+      const code = stream.language || "und";
+      if (!byCode.has(code)) {
+        byCode.set(code, { code, label: languageLabel(code), streamCount: 0, fileCount: 0 });
+      }
+      const entry = byCode.get(code);
+      entry.streamCount += 1;
+      if (!seenInThisFile.has(code)) {
+        entry.fileCount += 1;
+        seenInThisFile.add(code);
+      }
+    }
+  }
+  return Array.from(byCode.values()).sort(
+    (a, b) => b.streamCount - a.streamCount || a.label.localeCompare(b.label)
+  );
+}
+
 const VIDEO_TYPES = /\.(mp4|mov|mkv|avi|flv|webm|m4v|wmv)$/i;
 
 // Very large files roughly double their size in browser memory (original + wasm FS
@@ -562,6 +589,117 @@ export function useTrackQueue() {
     [bundleExtractedOfKindForQueue]
   );
 
+  // ---- queue-level: "target languages" extract, across every file at once.
+  // Given a set of selected language codes, walks every track's streams of
+  // one kind, extracts any matching stream that hasn't already been pulled
+  // (reusing an already-"done" one instead of re-running ffmpeg on it), and
+  // zips the whole set together. This is what powers the "Target
+  // languages…" picker on the queue toolbar — one click extracts + bundles
+  // only the languages the user actually wants, across the whole queue.
+  const extractByLanguageForQueue = useCallback(
+    async (kind, selectedCodes) => {
+      const codes = new Set(selectedCodes);
+      const tracksAtStart = tracksRef.current;
+      const entries = [];
+      for (const track of tracksAtStart) {
+        const list = kind === "audio" ? track.audioStreams : track.subtitleStreams;
+        for (const stream of list) {
+          if (codes.has(stream.language || "und")) {
+            entries.push({ trackId: track.id, streamIndex: stream.index });
+          }
+        }
+      }
+      if (entries.length === 0) return;
+
+      const setStatus = kind === "audio" ? setQueueAudioAllStatus : setQueueSubsAllStatus;
+      const setProgress = kind === "audio" ? setQueueAudioAllProgress : setQueueSubsAllProgress;
+      const setResult = kind === "audio" ? setQueueAudioAllResult : setQueueSubsAllResult;
+
+      setStatus("extracting");
+      setProgress(0);
+      setResult(null);
+
+      const zip = new JSZip();
+      const usedNames = new Set();
+      const uniqueName = (name) => {
+        if (!usedNames.has(name)) {
+          usedNames.add(name);
+          return name;
+        }
+        const dot = name.lastIndexOf(".");
+        let n = 2;
+        let candidate;
+        do {
+          candidate = `${name.slice(0, dot)} (${n})${name.slice(dot)}`;
+          n++;
+        } while (usedNames.has(candidate));
+        usedNames.add(candidate);
+        return candidate;
+      };
+
+      try {
+        for (let i = 0; i < entries.length; i++) {
+          const { trackId, streamIndex } = entries[i];
+          const track = tracksRef.current.find((t) => t.id === trackId);
+          if (!track) {
+            setProgress((i + 1) / entries.length);
+            continue;
+          }
+          const list = kind === "audio" ? track.audioStreams : track.subtitleStreams;
+          const stream = list.find((s) => s.index === streamIndex);
+          if (!stream) {
+            setProgress((i + 1) / entries.length);
+            continue;
+          }
+
+          let blob, extension;
+          if (stream.status === "done" && stream.result?.blob) {
+            // already extracted by hand earlier — reuse it instead of redoing the work
+            blob = stream.result.blob;
+            extension = stream.result.extension;
+          } else {
+            const res = await extractOneStream(trackId, kind, streamIndex);
+            if (!res) {
+              setProgress((i + 1) / entries.length);
+              continue; // that one stream failed — skip it, keep going with the rest
+            }
+            blob = res.blob;
+            extension = res.extension;
+          }
+
+          const base = stripExt(track.name);
+          const langTag = stream.language && stream.language !== "und" ? `.${stream.language}` : "";
+          zip.file(uniqueName(`${base}${langTag}.${extension}`), blob);
+          setProgress((i + 1) / entries.length);
+        }
+
+        const zipBlob = await zip.generateAsync({ type: "blob", compression: "STORE" });
+        setStatus("done");
+        setProgress(1);
+        setResult(zipBlob);
+      } catch (err) {
+        console.error(`[extractByLanguage:${kind}] failed:`, err);
+        setStatus("error");
+        setProgress(0);
+      }
+    },
+    [extractOneStream]
+  );
+
+  const extractAudioByLanguageQueue = useCallback(
+    (codes) => extractByLanguageForQueue("audio", codes),
+    [extractByLanguageForQueue]
+  );
+  const extractSubtitlesByLanguageQueue = useCallback(
+    (codes) => extractByLanguageForQueue("subtitle", codes),
+    [extractByLanguageForQueue]
+  );
+
+  // Per-language counts across the whole queue, live — feeds the "target
+  // languages" picker so it can show e.g. "Korean · 4 tracks · 2 files".
+  const audioLanguageOptions = buildLanguageOptions(tracks, "audio");
+  const subtitleLanguageOptions = buildLanguageOptions(tracks, "subtitle");
+
   // Counts of already-extracted (status "done") streams of each kind across
   // the whole queue right now — used to enable/disable + label the queue
   // bundle buttons ("Bundle extracted (3)").
@@ -626,5 +764,11 @@ export function useTrackQueue() {
     extractAllSubtitlesQueue,
     downloadAllSubtitlesQueue,
     queueSubsExtractedCount,
+    // "target languages" picker: pick which language(s) to extract, across
+    // every file in the queue, in one go
+    audioLanguageOptions,
+    subtitleLanguageOptions,
+    extractAudioByLanguageQueue,
+    extractSubtitlesByLanguageQueue,
   };
 }

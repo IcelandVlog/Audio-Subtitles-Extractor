@@ -273,7 +273,9 @@ export const TOOLS = {
     fields: [],
     multiFile: true,
     minFiles: 1,
+
     maxFiles: 100,
+
     actionLabel: "Detect",
     showPercent: true,
     progressLabel: "Detecting",
