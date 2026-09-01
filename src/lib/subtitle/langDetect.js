@@ -104,6 +104,95 @@ const ISO_639_3 = {
 };
 
 /**
+ * franc's trigram model is excellent for telling unrelated languages apart,
+ * but a handful of standard-language pairs share almost their entire trigram
+ * profile because they're mutually intelligible with mostly the same script
+ * and grammar — Croatian/Bosnian/Serbian(-Latin), and Indonesian/Malay.
+ * Trigram frequency alone regularly can't separate these, but each pair has
+ * real vocabulary that reliably differs between the standards (e.g. Croatian
+ * "kruh" vs Bosnian/Serbian "hljeb"/"hleb" for bread, or Serbian's ekavian
+ * "vreme" vs Croatian/Bosnian ijekavian "vrijeme" for time). We score each
+ * cluster member by how many of its marker words actually appear in the
+ * text and let that override franc's raw guess; with no marker words found
+ * anywhere, franc's own top pick is left untouched rather than guessing blind.
+ */
+const CONFUSABLE_CLUSTERS = [
+  {
+    members: ["hrv", "bos", "srp"],
+    groups: [
+      // Croatian-only vocabulary — no other standard uses these words.
+      {
+        weight: { hrv: 2 },
+        words: [
+          "tisuću", "tisuća", "kruh", "tjedan", "glazba", "općina", "vlak", "tvrtka",
+          "vjerojatno", "siječanj", "veljača", "ožujak", "travanj", "lipanj", "srpanj",
+          "kolovoz", "rujan", "listopad", "studeni", "prosinac",
+        ],
+      },
+      // Ijekavian forms — used by Croatian AND Bosnian, never by standard Serbian.
+      {
+        weight: { hrv: 1, bos: 1 },
+        words: ["vrijeme", "rijeka", "mlijeko", "lijep", "snijeg", "djevojka", "čovjek", "pjesma"],
+      },
+      // Ekavian forms — the Serbian standard's signature, never Croatian/Bosnian.
+      {
+        weight: { srp: 2 },
+        words: ["vreme", "reka", "mleko", "lep", "sneg", "devojka", "čovek", "covek", "pesma"],
+      },
+      // Vocabulary Bosnian and Serbian share but Croatian doesn't use.
+      { weight: { bos: 1, srp: 1 }, words: ["opština", "voz", "muzika", "hiljada", "hiljadu"] },
+      // "Bread" spelling splits three ways: kruh (hrv) / hljeb (bos) / hleb (srp).
+      { weight: { bos: 2 }, words: ["hljeb"] },
+      { weight: { srp: 2 }, words: ["hleb"] },
+    ],
+  },
+  {
+    members: ["ind", "zlm"],
+    groups: [
+      {
+        weight: { ind: 1 },
+        words: ["karena", "nggak", "enggak", "banget", "gimana", "kayak", "udah", "kalo", "dong", "nih", "sih", "kok"],
+      },
+      {
+        weight: { zlm: 1 },
+        words: ["kerana", "hendak", "mesti", "awak", "sahaja", "boleh", "nak", "lah", "kot", "punyalah"],
+      },
+    ],
+  },
+];
+
+function refineConfusable(iso3, text) {
+  const cluster = CONFUSABLE_CLUSTERS.find((c) => c.members.includes(iso3));
+  if (!cluster) return iso3;
+
+  const lower = text.toLowerCase();
+  const scores = Object.fromEntries(cluster.members.map((m) => [m, 0]));
+  for (const group of cluster.groups) {
+    for (const word of group.words) {
+      const matches = lower.match(new RegExp(`\\b${word}\\b`, "g"));
+      if (!matches) continue;
+      for (const [member, weight] of Object.entries(group.weight)) {
+        scores[member] += matches.length * weight;
+      }
+    }
+  }
+
+  let best = iso3;
+  let bestScore = scores[iso3] ?? 0;
+  let totalEvidence = 0;
+  for (const [member, score] of Object.entries(scores)) {
+    totalEvidence += score;
+    if (score > bestScore) {
+      bestScore = score;
+      best = member;
+    }
+  }
+  // No marker words found anywhere in the cluster — no evidence to override
+  // franc's own guess with, so leave it as-is rather than flipping blind.
+  return totalEvidence > 0 ? best : iso3;
+}
+
+/**
  * Detects the dominant language of subtitle dialogue text.
  * @param {string} text Plain dialogue text (timestamps/formatting stripped).
  * @returns {{ iso3: string, code: string, label: string, confidence: number } | null}
@@ -111,9 +200,10 @@ const ISO_639_3 = {
  *   otherwise the 3-letter code); `null` if there wasn't enough text to tell.
  */
 export function detectSubtitleLanguage(text) {
-  const [iso3, confidence] = francAll(text || "", { minLength: 10 })[0];
-  if (!iso3 || iso3 === "und") return null;
+  const [iso3Raw, confidence] = francAll(text || "", { minLength: 10 })[0];
+  if (!iso3Raw || iso3Raw === "und") return null;
 
+  const iso3 = refineConfusable(iso3Raw, text || "");
   const [short, name] = ISO_639_3[iso3] || [null, null];
   return {
     iso3,
