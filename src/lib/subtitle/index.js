@@ -15,6 +15,7 @@ import { ocrFramesToCues } from "./ocr";
 import { cuesToPinyin } from "./pinyin";
 import { detectSubtitleLanguage } from "./langDetect";
 import { compressAudio } from "../ffmpegEngine";
+import JSZip from "jszip";
 
 const OCR_LANG_FIELD = {
   key: "lang",
@@ -270,25 +271,48 @@ export const TOOLS = {
     category: "other",
     accept: ".srt,.vtt,.ass,.ssa,.sbv",
     fields: [],
-    hint: "Reads the dialogue text and identifies which of 150+ languages it's written in — no audio needed. The file comes back unchanged except for a language-code tag in the filename (movie.bn.srt, movie.en.srt, ...) so players like Plex, Jellyfin, Kodi, and VLC pick up the language automatically.",
-    async run([file]) {
-      const text = await readText(file);
-      const { cues, format } = parseAny(file.name, text);
-      const detected = detectSubtitleLanguage(cuesToPlainText(cues));
-      const isVtt = format === "vtt";
-      const ext = isVtt ? "vtt" : "srt";
-      const body = isVtt ? toVttText(cues) : toSrtText(cues);
+    multiFile: true,
+    minFiles: 1,
+    maxFiles: 25,
+    actionLabel: "Detect",
+    showPercent: true,
+    progressLabel: "Detecting",
+    hint: "Reads the dialogue text and identifies which of 150+ languages it's written in — no audio needed. The file comes back unchanged except for a language-code tag in the filename (movie.bn.srt, movie.en.srt, ...) so players like Plex, Jellyfin, Kodi, and VLC pick up the language automatically. Add more than one file to detect and tag them all in one go.",
+    async run(files, options, onProgress) {
+      const results = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const text = await readText(file);
+        const { cues, format } = parseAny(file.name, text);
+        const detected = detectSubtitleLanguage(cuesToPlainText(cues));
+        const isVtt = format === "vtt";
+        const ext = isVtt ? "vtt" : "srt";
+        const body = isVtt ? toVttText(cues) : toSrtText(cues);
 
-      if (!detected) {
-        const out = download(`${baseName(file.name)}.${ext}`, body, "text/plain");
-        out.note = "Couldn't confidently identify the language — there may not be enough dialogue text to go on.";
+        const name = detected
+          ? `${baseName(file.name)}.${detected.code}.${ext}`
+          : `${baseName(file.name)}.${ext}`;
+        const summary = detected
+          ? `${file.name} → ${detected.label} (${detected.code}) · ${Math.round(
+              detected.confidence * 100
+            )}% confidence`
+          : `${file.name} → couldn't confidently identify the language`;
+
+        results.push({ name, blob: new Blob([body], { type: "text/plain" }), summary });
+        onProgress?.((i + 1) / files.length);
+      }
+
+      if (results.length === 1) {
+        const out = download(results[0].name, results[0].blob, "text/plain");
+        out.note = results[0].summary;
         return out;
       }
 
-      const out = download(`${baseName(file.name)}.${detected.code}.${ext}`, body, "text/plain");
-      out.note = `Detected language: ${detected.label} (${detected.code}) · ${Math.round(
-        detected.confidence * 100
-      )}% confidence`;
+      const zip = new JSZip();
+      for (const r of results) zip.file(r.name, r.blob);
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const out = download("detected-languages.zip", zipBlob, "application/zip");
+      out.note = results.map((r) => r.summary).join("\n");
       return out;
     },
   },

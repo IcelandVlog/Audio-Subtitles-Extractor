@@ -235,7 +235,7 @@ export default function ToolPage({ toolId, onHome }) {
                 ? `${tool.progressLabel || "Converting"}… ${Math.round(progress * 100)}%${
                     tool.progressSuffix ? ` — ${tool.progressSuffix}` : ""
                   }`
-                : "Converting…"}
+                : `${tool.progressLabel || "Converting"}…`}
             </span>
           </div>
         )}
@@ -259,7 +259,7 @@ export default function ToolPage({ toolId, onHome }) {
             Reset
           </button>
           <button type="button" className="tool-modal__run" disabled={!canRun} onClick={handleRun}>
-            {status === "running" ? "Working…" : "Convert"}
+            {status === "running" ? "Working…" : tool.actionLabel || "Convert"}
           </button>
         </div>
       </section>
