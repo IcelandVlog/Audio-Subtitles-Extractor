@@ -151,7 +151,9 @@ export default function ToolModal({ toolId, onClose }) {
             <div className="tool-modal__progress-bar">
               <div className="tool-modal__progress-fill" style={{ width: `${Math.round(progress * 100)}%` }} />
             </div>
-            <span>{tool.beta ? "Running OCR… this can take a minute" : "Converting…"}</span>
+            <span>
+              {tool.beta ? `Running OCR… ${Math.round(progress * 100)}% — this can take a minute` : "Converting…"}
+            </span>
           </div>
         )}
 
