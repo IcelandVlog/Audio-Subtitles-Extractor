@@ -290,20 +290,27 @@ export function extractAudioNative({ inputName, streamIndex, codec, onProgress }
 }
 
 /**
- * Pull just the first few seconds of a single audio stream via stream copy —
- * for language auto-detection, which only ever looks at a short clip, so
+ * Pull just a short slice of a single audio stream via stream copy — for
+ * language auto-detection, which only ever looks at a short clip, so
  * there's no reason to demux the whole track (or the whole video) the way
  * extractAudioNative does. Near-instant even on a multi-hour file.
+ *
+ * `startSeconds` seeks in before grabbing the clip — callers pass this when
+ * they know the file is long enough to spare skipping a likely-non-speech
+ * lead-in (studio logos, silent black frames, instrumental intros), since
+ * running language-ID on that instead of actual dialogue is a common way to
+ * get the wrong language back.
  */
-export function extractAudioSample({ inputName, streamIndex, codec, seconds = 45 }) {
+export function extractAudioSample({ inputName, streamIndex, codec, seconds = 45, startSeconds = 0 }) {
   return runExclusive(async () => {
     const ffmpeg = await loadEngine();
     const extension = nativeContainerFor(codec);
     const outputName = `sample_${streamIndex}.${extension}`;
 
     try {
-      await ffmpeg.exec([
-        ...FAST_OPEN_ARGS,
+      const args = [...FAST_OPEN_ARGS];
+      if (startSeconds > 0) args.push("-ss", String(startSeconds));
+      args.push(
         "-i",
         inputName,
         "-map",
@@ -313,8 +320,9 @@ export function extractAudioSample({ inputName, streamIndex, codec, seconds = 45
         "-vn",
         "-c:a",
         "copy",
-        outputName,
-      ]);
+        outputName
+      );
+      await ffmpeg.exec(args);
       const data = await ffmpeg.readFile(outputName);
       return new Blob([data.buffer]);
     } finally {

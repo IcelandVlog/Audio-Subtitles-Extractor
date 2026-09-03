@@ -126,10 +126,16 @@ function shapeChunk(chunkResult, offsetMs) {
  * compare the logits at just the ~99 language-id tokens. Whichever language
  * token scores highest is the detected language.
  *
+ * `offsetSeconds` skips ahead before taking the sample — video/audio files
+ * very often open with a studio logo, silent black frame, or instrumental
+ * intro before anyone actually speaks, and language-ID run on that lead-in
+ * is a common cause of a wrong (or English-biased) guess. Callers that know
+ * the clip has room to spare should skip past it.
+ *
  * Returns `{ code, confidence }` (code is a Whisper language code like "bn"),
  * or `null` if detection isn't possible for this model/runtime.
  */
-export async function detectLanguage(transcriber, audioFloat32) {
+export async function detectLanguage(transcriber, audioFloat32, { offsetSeconds = 0 } = {}) {
   try {
     const model = transcriber.model;
     const genConfig = model?.generation_config;
@@ -138,8 +144,13 @@ export async function detectLanguage(transcriber, audioFloat32) {
     if (!langToId || decoderStart == null) return null; // e.g. an English-only checkpoint
 
     // A handful of seconds is plenty for language ID and keeps this fast.
-    const sampleSeconds = Math.min(30, audioFloat32.length / SAMPLE_RATE);
-    const sample = audioFloat32.subarray(0, Math.round(sampleSeconds * SAMPLE_RATE));
+    // Clamp the offset so a clip shorter than the requested skip still
+    // leaves something to sample, rather than handing the model silence.
+    const totalSeconds = audioFloat32.length / SAMPLE_RATE;
+    const safeOffsetSeconds = totalSeconds > offsetSeconds + 5 ? offsetSeconds : 0;
+    const offsetSamples = Math.round(safeOffsetSeconds * SAMPLE_RATE);
+    const sampleSeconds = Math.min(30, (audioFloat32.length - offsetSamples) / SAMPLE_RATE);
+    const sample = audioFloat32.subarray(offsetSamples, offsetSamples + Math.round(sampleSeconds * SAMPLE_RATE));
 
     const { input_features } = await transcriber.processor(sample);
     const decoder_input_ids = new Tensor("int64", new BigInt64Array([BigInt(decoderStart)]), [1, 1]);
@@ -181,16 +192,22 @@ export async function detectLanguage(transcriber, audioFloat32) {
  * Identifies the spoken language of a short standalone audio clip — the
  * "Detect language" button on an extracted audio track, as opposed to
  * detectLanguage() above which needs an already-loaded transcriber and
- * already-decoded samples. This loads the tiny multilingual Whisper model
- * (fast — it's only used for one encoder pass + one decoder step, never for
- * actual transcription) and decodes the clip itself, so callers just hand it
- * a Blob (e.g. a few seconds/minutes of stream-copied audio) and get back
- * `{ code, confidence }` or `null` if detection wasn't possible.
+ * already-decoded samples. Uses the base (not tiny) multilingual Whisper
+ * checkpoint — language ID is only one encoder pass + one decoder step
+ * regardless of model size, so the accuracy jump from tiny → base costs
+ * almost nothing here, unlike full transcription where it matters a lot.
+ * Also skips a short lead-in on longer clips (see detectLanguage's offset
+ * note above) before decoding the whole clip itself, so callers just hand
+ * it a Blob and get back `{ code, confidence }` or `null`.
  */
 export async function detectAudioBlobLanguage(blob, { onModelProgress } = {}) {
-  const transcriber = await getTranscriber("fast", "auto", onModelProgress);
+  const transcriber = await getTranscriber("balanced", "auto", onModelProgress);
   const audioFloat32 = await decodeAudioTo16kMono(blob);
-  return detectLanguage(transcriber, audioFloat32);
+  const totalSeconds = audioFloat32.length / SAMPLE_RATE;
+  // Only skip ahead when the clip is comfortably longer than the skip
+  // itself — a short clip is more likely to be all we've got, intro or not.
+  const offsetSeconds = totalSeconds > 20 ? Math.min(10, totalSeconds * 0.15) : 0;
+  return detectLanguage(transcriber, audioFloat32, { offsetSeconds });
 }
 
 /**

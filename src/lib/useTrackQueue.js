@@ -384,12 +384,22 @@ export function useTrackQueue() {
       });
 
       try {
+        // Skip a likely-non-speech lead-in (logo/silence/instrumental
+        // intro) when the video is long enough to spare it — sampling from
+        // time zero on a video that opens with a studio logo is a common
+        // way to get the wrong language back. Only applies to a fresh
+        // extraction; an already-cached `native` blob (the whole track) is
+        // handled by detectAudioBlobLanguage's own offset instead.
+        const duration = track.duration || 0;
+        const startSeconds = duration > 40 ? Math.min(20, duration * 0.15) : 0;
+
         const sampleBlob =
           stream.native?.blob ||
           (await extractAudioSample({
             inputName: track.inputName,
             streamIndex,
             codec: stream.codec,
+            startSeconds,
           }));
 
         // Heavy (transformers.js + onnxruntime-web) — only pulled in the
