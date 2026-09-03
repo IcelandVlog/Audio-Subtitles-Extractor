@@ -16,6 +16,7 @@ export default function StreamTable({
   onShowOne,
   onDownloadOne,
   onDownloadAll,
+  onDetectLanguage,
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const isAudio = kind === "audio";
@@ -87,6 +88,23 @@ export default function StreamTable({
                 <span className="stream-row__name" title={s.label}>
                   {s.label}
                 </span>
+                {isAudio && (!s.language || s.language === "und") && (
+                  <button
+                    type="button"
+                    className="stream-row__detect"
+                    disabled={
+                      disabled || allRunning || s.status === "extracting" || s.languageDetectStatus === "detecting"
+                    }
+                    onClick={() => onDetectLanguage(s.index)}
+                    title="Guess the spoken language from the audio itself (runs a small speech model in your browser)"
+                  >
+                    {s.languageDetectStatus === "detecting"
+                      ? "Detecting…"
+                      : s.languageDetectStatus === "error"
+                      ? "Detect failed — retry"
+                      : "Detect language"}
+                  </button>
+                )}
                 <span className="stream-row__ext">
                   {isAudio ? null : `.${guessSubtitleExtension(s.codec)}`}
                 </span>

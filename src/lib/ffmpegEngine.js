@@ -290,6 +290,40 @@ export function extractAudioNative({ inputName, streamIndex, codec, onProgress }
 }
 
 /**
+ * Pull just the first few seconds of a single audio stream via stream copy —
+ * for language auto-detection, which only ever looks at a short clip, so
+ * there's no reason to demux the whole track (or the whole video) the way
+ * extractAudioNative does. Near-instant even on a multi-hour file.
+ */
+export function extractAudioSample({ inputName, streamIndex, codec, seconds = 45 }) {
+  return runExclusive(async () => {
+    const ffmpeg = await loadEngine();
+    const extension = nativeContainerFor(codec);
+    const outputName = `sample_${streamIndex}.${extension}`;
+
+    try {
+      await ffmpeg.exec([
+        ...FAST_OPEN_ARGS,
+        "-i",
+        inputName,
+        "-map",
+        `0:${streamIndex}`,
+        "-t",
+        String(seconds),
+        "-vn",
+        "-c:a",
+        "copy",
+        outputName,
+      ]);
+      const data = await ffmpeg.readFile(outputName);
+      return new Blob([data.buffer]);
+    } finally {
+      await ffmpeg.deleteFile(outputName).catch(() => {});
+    }
+  });
+}
+
+/**
  * Convert an already-extracted native audio blob (small — just that one
  * track) into the requested format. Re-processes only that small file, never
  * the source video, so switching output format after the first extract is

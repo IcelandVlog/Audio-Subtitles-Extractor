@@ -178,6 +178,22 @@ export async function detectLanguage(transcriber, audioFloat32) {
 }
 
 /**
+ * Identifies the spoken language of a short standalone audio clip — the
+ * "Detect language" button on an extracted audio track, as opposed to
+ * detectLanguage() above which needs an already-loaded transcriber and
+ * already-decoded samples. This loads the tiny multilingual Whisper model
+ * (fast — it's only used for one encoder pass + one decoder step, never for
+ * actual transcription) and decodes the clip itself, so callers just hand it
+ * a Blob (e.g. a few seconds/minutes of stream-copied audio) and get back
+ * `{ code, confidence }` or `null` if detection wasn't possible.
+ */
+export async function detectAudioBlobLanguage(blob, { onModelProgress } = {}) {
+  const transcriber = await getTranscriber("fast", "auto", onModelProgress);
+  const audioFloat32 = await decodeAudioTo16kMono(blob);
+  return detectLanguage(transcriber, audioFloat32);
+}
+
+/**
  * Runs Whisper over already-decoded mono/16kHz audio and returns cues in the
  * app's shared { start, end, text } (ms) model, ready for toSrtText/toVttText/etc.
  *

@@ -6,6 +6,7 @@ import {
   cleanupInput,
   loadEngine,
   extractAudioNative,
+  extractAudioSample,
   convertAudioFromNative,
   formatMatchesCodec,
   defaultFormatForCodec,
@@ -82,6 +83,11 @@ function makeAudioStream(s) {
     result: null, // { extension, blob } once extracted — kept for Download
     native: null, // { blob, extension, codec } — original stream, copied not re-encoded; cached so switching format doesn't re-touch the source video
     error: null,
+    // Auto language detection (Whisper langID on a short clip) — separate
+    // from `status`/`error` above since it's an independent, optional action
+    // that can run whether or not the track itself has been extracted yet.
+    languageDetectStatus: "idle", // idle | detecting | done | error
+    languageDetectConfidence: null,
   };
 }
 
@@ -357,6 +363,58 @@ export function useTrackQueue() {
   const extractOneSubtitle = useCallback(
     (trackId, streamIndex) => extractOneStream(trackId, "subtitle", streamIndex),
     [extractOneStream]
+  );
+
+  // ---- audio language auto-detection ----
+  // Identifies the spoken language of an audio track (e.g. when the source
+  // file's metadata left it tagged "und") by running Whisper's language-ID
+  // step over a short clip. Pulls just a few seconds via stream copy — or
+  // reuses the already-extracted `native` blob if there is one — so this
+  // stays fast even on long videos, then writes the detected code straight
+  // onto the stream the same way a metadata language tag would have.
+  const detectAudioLanguage = useCallback(
+    async (trackId, streamIndex) => {
+      const track = tracksRef.current.find((t) => t.id === trackId);
+      const stream = track?.audioStreams.find((s) => s.index === streamIndex);
+      if (!track || !stream || stream.languageDetectStatus === "detecting") return;
+
+      patchStream(trackId, "audio", streamIndex, {
+        languageDetectStatus: "detecting",
+        languageDetectConfidence: null,
+      });
+
+      try {
+        const sampleBlob =
+          stream.native?.blob ||
+          (await extractAudioSample({
+            inputName: track.inputName,
+            streamIndex,
+            codec: stream.codec,
+          }));
+
+        // Heavy (transformers.js + onnxruntime-web) — only pulled in the
+        // first time someone actually clicks "Detect language", same as the
+        // Video → Subtitles tool does for the transcriber itself.
+        const { detectAudioBlobLanguage } = await import("./subtitle/transcribe");
+        const detected = await detectAudioBlobLanguage(sampleBlob);
+
+        if (!detected) {
+          patchStream(trackId, "audio", streamIndex, { languageDetectStatus: "error" });
+          return;
+        }
+
+        patchStream(trackId, "audio", streamIndex, {
+          language: detected.code,
+          label: languageLabel(detected.code),
+          languageDetectStatus: "done",
+          languageDetectConfidence: detected.confidence,
+        });
+      } catch (err) {
+        console.error("[detectAudioLanguage] failed:", err);
+        patchStream(trackId, "audio", streamIndex, { languageDetectStatus: "error" });
+      }
+    },
+    [patchStream]
   );
 
   // "Download": just saves the already-extracted blob, no re-extraction.
@@ -750,6 +808,7 @@ export function useTrackQueue() {
     removeTrack,
     extractOneAudio,
     extractOneSubtitle,
+    detectAudioLanguage,
     downloadOneAudio,
     downloadOneSubtitle,
     extractAllAudio,

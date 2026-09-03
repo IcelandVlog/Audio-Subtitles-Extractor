@@ -16,6 +16,7 @@ export default function TrackCard({
   index,
   onSetFormat,
   onExtractOneAudio,
+  onDetectAudioLanguage,
   onDownloadOneAudio,
   onExtractOneSubtitle,
   onDownloadOneSubtitle,
@@ -145,6 +146,7 @@ export default function TrackCard({
             allStatus={audioAllStatus}
             allProgress={audioAllProgress}
             onExtractOne={(streamIndex) => onExtractOneAudio(id, streamIndex)}
+            onDetectLanguage={(streamIndex) => onDetectAudioLanguage(id, streamIndex)}
             onDownloadOne={(streamIndex) => onDownloadOneAudio(id, streamIndex)}
             onExtractAll={() => onExtractAllAudio(id)}
             onDownloadAll={() => onDownloadAllAudio(id)}

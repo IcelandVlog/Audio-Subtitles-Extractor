@@ -41,6 +41,7 @@ export default function App() {
     removeTrack,
     extractOneAudio,
     extractOneSubtitle,
+    detectAudioLanguage,
     downloadOneAudio,
     downloadOneSubtitle,
     extractAllAudio,
@@ -198,6 +199,7 @@ export default function App() {
                   index={i}
                   onSetFormat={setAudioFormat}
                   onExtractOneAudio={extractOneAudio}
+                  onDetectAudioLanguage={detectAudioLanguage}
                   onDownloadOneAudio={downloadOneAudio}
                   onExtractOneSubtitle={extractOneSubtitle}
                   onDownloadOneSubtitle={downloadOneSubtitle}
