@@ -15,7 +15,6 @@ import { ocrFramesToCues } from "./ocr";
 import { cuesToPinyin } from "./pinyin";
 import { detectSubtitleLanguage } from "./langDetect";
 import { compressAudio } from "../ffmpegEngine";
-import { languageLabel } from "../languages";
 import JSZip from "jszip";
 
 const OCR_LANG_FIELD = {
@@ -444,61 +443,6 @@ export const TOOLS = {
       const quality = options.quality || "medium";
       const { blob, extension } = await compressAudio({ file, format, quality, onProgress });
       return download(`${baseName(file.name)}.compressed.${extension}`, blob, blob.type);
-    },
-  },
-
-  "detect-audio-language": {
-    label: "Audio Language Detector",
-    category: "other",
-    accept: ".mp3,.wav,.aac,.m4a,.ogg,.flac,.wma",
-    fields: [],
-    multiFile: true,
-    minFiles: 1,
-    maxFiles: 50,
-    actionLabel: "Detect",
-    showPercent: true,
-    progressLabel: "Detecting",
-    hint: "Loads a small speech-recognition model in your browser and listens to roughly the first 30 seconds of each file to identify the spoken language — no metadata or transcript needed, works on plain audio files too. Each file comes back unchanged except for a language-code tag in the filename (song.bn.mp3, episode.ja.wav, ...) — the same convention players like Plex, Jellyfin, Kodi, and VLC pick up automatically. Add more than one file to detect and tag them all in one go.",
-    async run(files, options, onProgress) {
-      // Heavy (transformers.js + onnxruntime-web) — only fetched the first
-      // time someone actually opens this tool, same as Video → Subtitles.
-      const { detectAudioBlobLanguage } = await import("./transcribe");
-      const results = [];
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const ext = extOf(file.name);
-        let detected = null;
-        try {
-          detected = await detectAudioBlobLanguage(file);
-        } catch (err) {
-          console.error(`[detect-audio-language] ${file.name} failed:`, err);
-        }
-
-        const name = detected
-          ? `${baseName(file.name)}.${detected.code}${ext}`
-          : `${baseName(file.name)}${ext}`;
-        const summary = detected
-          ? `${file.name} → ${languageLabel(detected.code)} (${detected.code}) · ${Math.round(
-              detected.confidence * 100
-            )}% confidence`
-          : `${file.name} → couldn't confidently identify the language`;
-
-        results.push({ name, blob: file, summary });
-        onProgress?.((i + 1) / files.length);
-      }
-
-      if (results.length === 1) {
-        const out = download(results[0].name, results[0].blob, results[0].blob.type || "audio/mpeg");
-        out.note = results[0].summary;
-        return out;
-      }
-
-      const zip = new JSZip();
-      for (const r of results) zip.file(r.name, r.blob);
-      const zipBlob = await zip.generateAsync({ type: "blob", compression: "STORE" });
-      const out = download("detected-audio-languages.zip", zipBlob, "application/zip");
-      out.note = results.map((r) => r.summary).join("\n");
-      return out;
     },
   },
 };

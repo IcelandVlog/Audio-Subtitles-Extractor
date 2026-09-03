@@ -45,12 +45,6 @@ export const TOOL_CATEGORIES = [
       { id: "position-changer", label: "Position changer", route: "position-changer" },
       { id: "pinyin", label: "Make Pinyin Subtitles", route: "pinyin" },
       { id: "compress-audio", label: "Audio Compressor", route: "compress-audio", badge: "New!" },
-      {
-        id: "detect-audio-language",
-        label: "Audio Language Detector",
-        route: "detect-audio-language",
-        badge: "New!",
-      },
     ],
   },
 ];
