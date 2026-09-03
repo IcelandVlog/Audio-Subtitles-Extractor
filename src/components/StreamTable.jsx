@@ -17,6 +17,7 @@ export default function StreamTable({
   onDownloadOne,
   onDownloadAll,
   onDetectLanguage,
+  onOpenDetectTool,
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const isAudio = kind === "audio";
@@ -43,6 +44,29 @@ export default function StreamTable({
           {hasStreams && <span className="stream-table__count">{streams.length}</span>}
         </span>
         <span className="stream-table__head-right">
+          {hasStreams &&
+            (isAudio ? (
+              <span
+                className="stream-table__detect-tag"
+                title="Any track below with an unknown language gets a 'Detect language' button"
+              >
+                auto-detect
+              </span>
+            ) : (
+              onOpenDetectTool && (
+                <button
+                  type="button"
+                  className="stream-table__detect-tag stream-table__detect-tag--link"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenDetectTool();
+                  }}
+                  title="Open the standalone Subtitle Language Detector tool"
+                >
+                  detect language
+                </button>
+              )
+            ))}
           {hasStreams &&
             (allRunning ? (
               <span className="stream-table__all-progress">{Math.round(allProgress * 100)}%</span>

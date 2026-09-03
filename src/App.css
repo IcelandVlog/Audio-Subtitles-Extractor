@@ -480,6 +480,25 @@
   vertical-align: 1px;
 }
 
+.stream-table__detect-tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--text-faint);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: default;
+}
+.stream-table__detect-tag--link {
+  color: var(--phosphor);
+  cursor: pointer;
+}
+.stream-table__detect-tag--link:hover {
+  text-decoration: underline;
+}
+
 .stream-table__empty {
   padding: 16px 14px;
   margin: 0;

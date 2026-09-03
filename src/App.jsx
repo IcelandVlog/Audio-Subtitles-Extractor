@@ -151,9 +151,9 @@ export default function App() {
             </h1>
             <p className="hero__sub">
               Drop in one or many videos and Strip lists every audio and subtitle track it finds —
-              pull out the ones you want, one at a time, then bundle whatever you've extracted
-              across every file into a single zip. Everything runs in this browser tab, so nothing
-              ever leaves your machine.
+              pull out the ones you want, detect a track's language when it's missing, then bundle
+              whatever you've extracted across every file into a single zip. Everything runs in
+              this browser tab, so nothing ever leaves your machine.
             </p>
             <Meter active={anyBusy} />
           </section>
@@ -207,6 +207,7 @@ export default function App() {
                   onDownloadAllAudio={downloadAllAudio}
                   onExtractAllSubtitles={extractAllSubtitles}
                   onDownloadAllSubtitles={downloadAllSubtitles}
+                  onOpenDetectTool={() => navigate(toolPathFor("detect-language"))}
                   onRemove={removeTrack}
                 />
               ))}

@@ -24,6 +24,7 @@ export default function TrackCard({
   onDownloadAllAudio,
   onExtractAllSubtitles,
   onDownloadAllSubtitles,
+  onOpenDetectTool,
   onRemove,
 }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -164,6 +165,7 @@ export default function TrackCard({
             onDownloadOne={(streamIndex) => onDownloadOneSubtitle(id, streamIndex)}
             onExtractAll={() => onExtractAllSubtitles(id)}
             onDownloadAll={() => onDownloadAllSubtitles(id)}
+            onOpenDetectTool={onOpenDetectTool}
           />
         </div>
       )}
