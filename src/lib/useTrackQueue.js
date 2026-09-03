@@ -368,10 +368,10 @@ export function useTrackQueue() {
   // ---- audio language auto-detection ----
   // Identifies the spoken language of an audio track (e.g. when the source
   // file's metadata left it tagged "und") by running Whisper's language-ID
-  // step over a short clip. Pulls just a few seconds via stream copy — or
-  // reuses the already-extracted `native` blob if there is one — so this
-  // stays fast even on long videos, then writes the detected code straight
-  // onto the stream the same way a metadata language tag would have.
+  // step over a few short clips pulled straight from the source via cheap
+  // ffmpeg stream-copy (never the full track), so this stays fast — and
+  // light on memory — even on long videos, then writes the detected code
+  // straight onto the stream the same way a metadata language tag would have.
   const detectAudioLanguage = useCallback(
     async (trackId, streamIndex) => {
       const track = tracksRef.current.find((t) => t.id === trackId);
@@ -387,37 +387,39 @@ export function useTrackQueue() {
         // Heavy (transformers.js + onnxruntime-web) — only pulled in the
         // first time someone actually clicks "Detect language", same as the
         // Video → Subtitles tool does for the transcriber itself.
-        const { detectAudioBlobLanguage, detectLanguageAcrossClips } = await import("./subtitle/transcribe");
+        const { detectLanguageAcrossClips } = await import("./subtitle/transcribe");
 
-        let detected;
-        if (stream.native?.blob) {
-          // Already have the whole track — detectAudioBlobLanguage samples
-          // several loudness-picked points within it itself.
-          detected = await detectAudioBlobLanguage(stream.native.blob);
-        } else {
-          // No cached track yet: pull a handful of short clips from points
-          // spread across the *real* duration (not just one slice near the
-          // start) via cheap stream-copy, so a long stretch of score,
-          // action, or ambient sound at any one point — common in a
-          // series/movie file — can't single-handedly decide the result.
-          const duration = track.duration || 0;
-          const startPoints =
-            duration > 40 ? [Math.min(20, duration * 0.15), duration * 0.45, duration * 0.75] : [0];
+        // Always pull a handful of short clips from points spread across the
+        // *real* duration (not just one slice near the start) via cheap
+        // ffmpeg stream-copy — regardless of whether the full track has
+        // already been extracted (`stream.native.blob`). Previously, once a
+        // track was extracted, this reused that full blob and ran it through
+        // decodeAudioTo16kMono, which decodes + renders the *entire* track
+        // via the Web Audio API before sampling just a few seconds of it —
+        // on a multi-hour file that's a multi-hundred-MB (sometimes multi-GB)
+        // allocation for a detection pass that only ever looks at ~2 minutes
+        // of audio. Sampling short clips straight from the source via ffmpeg
+        // (near-instant, stream-copy, no re-encode) avoids that entirely, so
+        // a long stretch of score, action, or ambient sound at any one point
+        // — common in a series/movie file — also can't single-handedly
+        // decide the result.
+        const duration = track.duration || 0;
+        const startPoints =
+          duration > 40 ? [Math.min(20, duration * 0.15), duration * 0.45, duration * 0.75] : [0];
 
-          const sampleBlobs = [];
-          for (const startSeconds of startPoints) {
-            sampleBlobs.push(
-              await extractAudioSample({
-                inputName: track.inputName,
-                streamIndex,
-                codec: stream.codec,
-                seconds: 30,
-                startSeconds,
-              })
-            );
-          }
-          detected = await detectLanguageAcrossClips(sampleBlobs);
+        const sampleBlobs = [];
+        for (const startSeconds of startPoints) {
+          sampleBlobs.push(
+            await extractAudioSample({
+              inputName: track.inputName,
+              streamIndex,
+              codec: stream.codec,
+              seconds: 30,
+              startSeconds,
+            })
+          );
         }
+        const detected = await detectLanguageAcrossClips(sampleBlobs);
 
         if (!detected) {
           patchStream(trackId, "audio", streamIndex, { languageDetectStatus: "error" });

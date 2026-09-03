@@ -333,25 +333,16 @@ function tallyDetections(detections) {
  * just hand it a Blob and get back `{ code, confidence }` or `null` if
  * nothing could be confidently detected at all.
  */
-<<<<<<< HEAD
-export async function detectAudioBlobLanguage(blob, { onModelProgress } = {}) {
-=======
 export async function detectAudioBlobLanguage(blob, { onModelProgress, onSampleProgress } = {}) {
->>>>>>> 0dad26a (update0)
   const transcriber = await getTranscriber("lid", "auto", onModelProgress);
   const audioFloat32 = await decodeAudioTo16kMono(blob);
   const totalSeconds = audioFloat32.length / SAMPLE_RATE;
 
   const offsets = pickSpeechyOffsets(audioFloat32, totalSeconds);
   const detections = [];
-<<<<<<< HEAD
-  for (const offsetSeconds of offsets) {
-    detections.push(await detectLanguage(transcriber, audioFloat32, { offsetSeconds }));
-=======
   for (let i = 0; i < offsets.length; i++) {
     detections.push(await detectLanguage(transcriber, audioFloat32, { offsetSeconds: offsets[i] }));
     onSampleProgress?.((i + 1) / offsets.length);
->>>>>>> 0dad26a (update0)
   }
   return tallyDetections(detections);
 }
@@ -368,19 +359,11 @@ export async function detectAudioBlobLanguage(blob, { onModelProgress, onSampleP
  * to pull a few short clips instead of one (e.g. via ffmpeg stream-copy,
  * which is cheap) should prefer this for long source files.
  */
-<<<<<<< HEAD
-export async function detectLanguageAcrossClips(blobs, { onModelProgress } = {}) {
-  const transcriber = await getTranscriber("lid", "auto", onModelProgress);
-  const detections = [];
-  for (const blob of blobs) {
-    const audioFloat32 = await decodeAudioTo16kMono(blob);
-=======
 export async function detectLanguageAcrossClips(blobs, { onModelProgress, onSampleProgress } = {}) {
   const transcriber = await getTranscriber("lid", "auto", onModelProgress);
   const detections = [];
   for (let i = 0; i < blobs.length; i++) {
     const audioFloat32 = await decodeAudioTo16kMono(blobs[i]);
->>>>>>> 0dad26a (update0)
     const totalSeconds = audioFloat32.length / SAMPLE_RATE;
     // Each clip is already a short, targeted slice, so just pick the
     // loudest window(s) within it rather than re-spreading across it.
@@ -388,10 +371,7 @@ export async function detectLanguageAcrossClips(blobs, { onModelProgress, onSamp
     for (const offsetSeconds of offsets) {
       detections.push(await detectLanguage(transcriber, audioFloat32, { offsetSeconds }));
     }
-<<<<<<< HEAD
-=======
     onSampleProgress?.((i + 1) / blobs.length);
->>>>>>> 0dad26a (update0)
   }
   return tallyDetections(detections);
 }
