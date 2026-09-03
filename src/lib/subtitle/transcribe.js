@@ -18,6 +18,15 @@ function modelIdFor(quality, language) {
   // English-only checkpoints are smaller and noticeably faster than the
   // multilingual ones, so use them whenever the person picked English.
   const en = language === "en";
+  // Language-ID only, never transcription: OpenAI's own numbers (and
+  // everyday experience) show language identification gets *much* more
+  // reliable going from tiny/base up to small, especially for
+  // lower-resource languages (e.g. Bengali is easy to mix up with
+  // Hindi/Urdu/English at the smaller sizes) — and since a single LID pass
+  // is just one encoder pass + one decoder step, the jump barely costs
+  // anything in latency (it's a bigger download, but that's cached after
+  // the first "Detect language" click).
+  if (quality === "lid") return "Xenova/whisper-small";
   if (quality === "balanced") return en ? "Xenova/whisper-base.en" : "Xenova/whisper-base";
   return en ? "Xenova/whisper-tiny.en" : "Xenova/whisper-tiny";
 }
@@ -200,6 +209,7 @@ export async function detectLanguage(transcriber, audioFloat32, { offsetSeconds 
 // something a single "skip the intro" offset can fully guard against.
 // Spreading a few sample points across the clip and letting them vote is
 // far more robust than trusting whichever window happened to be tried.
+// Used as a fallback when we can't measure energy (see pickSpeechyOffsets).
 function pickSampleOffsets(totalSeconds) {
   if (totalSeconds <= 20) return [0]; // too short to do anything but use it all
   // Skip the very start (most likely to be a logo/silence/instrumental
@@ -215,54 +225,153 @@ function pickSampleOffsets(totalSeconds) {
   return offsets.length ? offsets : [0];
 }
 
+const LID_WINDOW_SECONDS = 30; // Whisper's context window; also our per-sample cap
+const ENERGY_FRAME_SECONDS = 5;
+
 /**
- * Identifies the spoken language of a short standalone audio clip — the
- * "Detect language" button on an extracted audio track, as opposed to
- * detectLanguage() above which needs an already-loaded transcriber and
- * already-decoded samples. Uses the base (not tiny) multilingual Whisper
- * checkpoint — language ID is only one encoder pass + one decoder step
- * regardless of model size, so the accuracy jump from tiny → base costs
- * almost nothing here, unlike full transcription where it matters a lot.
- * Samples a handful of points spread across the clip (see pickSampleOffsets)
- * and lets them vote rather than trusting a single window, so callers just
- * hand it a Blob and get back the majority-agreed `{ code, confidence }`
- * (confidence averaged over the windows that agreed), or `null` if nothing
- * could be detected at all.
+ * Picks language-ID sample points by loudness instead of blind fixed
+ * percentages of the clip. A movie or series episode routinely spends long
+ * stretches on score, sound effects, or ambient noise well beyond just the
+ * opening — a fixed-percentage offset can land on one of those just as
+ * easily as on dialogue, and a low-confidence guess on non-speech audio is,
+ * because Whisper's training data skews English, very often "en" — which is
+ * exactly the "everything comes back English" symptom this replaces
+ * pickSampleOffsets to fix. Splitting the clip into short frames, ranking
+ * them by RMS energy, and spreading the picks at least one window apart
+ * points every sample at audio that's actually likely to contain speech.
  */
-export async function detectAudioBlobLanguage(blob, { onModelProgress } = {}) {
-  const transcriber = await getTranscriber("balanced", "auto", onModelProgress);
-  const audioFloat32 = await decodeAudioTo16kMono(blob);
-  const totalSeconds = audioFloat32.length / SAMPLE_RATE;
+function pickSpeechyOffsets(audioFloat32, totalSeconds, { windowSeconds = LID_WINDOW_SECONDS, count = 4 } = {}) {
+  if (totalSeconds <= windowSeconds) return [0];
 
-  const offsets = pickSampleOffsets(totalSeconds);
+  const frameSamples = Math.round(ENERGY_FRAME_SECONDS * SAMPLE_RATE);
+  const frameCount = Math.floor(audioFloat32.length / frameSamples);
+  if (frameCount < 2) return pickSampleOffsets(totalSeconds);
+
+  const energies = new Array(frameCount);
+  for (let i = 0; i < frameCount; i++) {
+    const start = i * frameSamples;
+    let sumSq = 0;
+    for (let j = start; j < start + frameSamples; j++) {
+      const v = audioFloat32[j];
+      sumSq += v * v;
+    }
+    energies[i] = Math.sqrt(sumSq / frameSamples);
+  }
+
+  const maxEnergy = Math.max(...energies);
+  if (maxEnergy <= 0) return pickSampleOffsets(totalSeconds); // true silence throughout
+
+  // Keep frames with meaningful energy relative to the loudest one found —
+  // this throws out near-silence/quiet ambience without a fixed absolute
+  // threshold that would vary by how the source was mixed/normalized.
+  const threshold = maxEnergy * 0.25;
+  const loud = energies.map((e, i) => ({ i, e })).filter((f) => f.e >= threshold);
+  const pool = loud.length ? loud : energies.map((e, i) => ({ i, e }));
+
+  // Loudest first, then greedily keep picks spread at least one window
+  // apart so we don't sample the same speech burst three times over.
+  pool.sort((a, b) => b.e - a.e);
+  const minGapFrames = Math.ceil(windowSeconds / ENERGY_FRAME_SECONDS);
+  const chosenFrames = [];
+  for (const f of pool) {
+    if (chosenFrames.length >= count) break;
+    if (chosenFrames.every((c) => Math.abs(c - f.i) >= minGapFrames)) chosenFrames.push(f.i);
+  }
+  if (!chosenFrames.length) return pickSampleOffsets(totalSeconds);
+
+  return chosenFrames
+    .map((frameIndex) => Math.min((frameIndex * frameSamples) / SAMPLE_RATE, totalSeconds - windowSeconds))
+    .sort((a, b) => a - b);
+}
+
+// Below this, a "detection" is the model shrugging at silence/music/noise
+// rather than an actual read on the language — letting a shrug still cast a
+// full vote is how a single bad window drags the result towards whatever
+// Whisper defaults to (English) even when every clear-speech window agreed
+// on the real language. So votes are weighted by confidence, and anything
+// under the floor is dropped rather than counted at all.
+const MIN_LID_CONFIDENCE = 0.15;
+
+function tallyDetections(detections) {
   const votes = new Map(); // code -> { count, totalConfidence }
-
-  for (const offsetSeconds of offsets) {
-    const detected = await detectLanguage(transcriber, audioFloat32, { offsetSeconds });
-    if (!detected) continue;
+  for (const detected of detections) {
+    if (!detected || detected.confidence < MIN_LID_CONFIDENCE) continue;
     const entry = votes.get(detected.code) || { count: 0, totalConfidence: 0 };
     entry.count += 1;
     entry.totalConfidence += detected.confidence;
     votes.set(detected.code, entry);
   }
-
   if (votes.size === 0) return null;
 
-  // Majority vote wins; ties broken by whichever had the higher average
-  // confidence across the windows that picked it.
+  // Rank by total confidence accumulated, not raw vote count — one window
+  // that clearly recognized the language should outweigh several uncertain
+  // ones that happened to agree on something else.
   let bestCode = null;
-  let bestCount = -1;
+  let bestTotal = -1;
   let bestAvgConfidence = -1;
   for (const [code, { count, totalConfidence }] of votes) {
-    const avgConfidence = totalConfidence / count;
-    if (count > bestCount || (count === bestCount && avgConfidence > bestAvgConfidence)) {
+    if (totalConfidence > bestTotal) {
       bestCode = code;
-      bestCount = count;
-      bestAvgConfidence = avgConfidence;
+      bestTotal = totalConfidence;
+      bestAvgConfidence = totalConfidence / count;
     }
   }
-
   return { code: bestCode, confidence: bestAvgConfidence };
+}
+
+/**
+ * Identifies the spoken language of a short standalone audio clip — the
+ * "Detect language" button on an extracted audio track, as opposed to
+ * detectLanguage() above which needs an already-loaded transcriber and
+ * already-decoded samples. Uses the "small" multilingual Whisper checkpoint
+ * (see modelIdFor's "lid" case) — language ID is only one encoder pass + one
+ * decoder step regardless of model size, so the accuracy jump up from
+ * tiny/base costs almost nothing here, unlike full transcription where a
+ * bigger model matters a lot more (and costs a lot more).
+ * Samples several loudness-picked points spread across the clip (see
+ * pickSpeechyOffsets) and combines them with tallyDetections, so callers
+ * just hand it a Blob and get back `{ code, confidence }` or `null` if
+ * nothing could be confidently detected at all.
+ */
+export async function detectAudioBlobLanguage(blob, { onModelProgress } = {}) {
+  const transcriber = await getTranscriber("lid", "auto", onModelProgress);
+  const audioFloat32 = await decodeAudioTo16kMono(blob);
+  const totalSeconds = audioFloat32.length / SAMPLE_RATE;
+
+  const offsets = pickSpeechyOffsets(audioFloat32, totalSeconds);
+  const detections = [];
+  for (const offsetSeconds of offsets) {
+    detections.push(await detectLanguage(transcriber, audioFloat32, { offsetSeconds }));
+  }
+  return tallyDetections(detections);
+}
+
+/**
+ * Same idea as detectAudioBlobLanguage, but for several separately-extracted
+ * short clips pulled from spread-out points in the *original* (often
+ * multi-hour) source, rather than one clip that then gets sampled
+ * internally. Extracting only a single short slice before detection ever
+ * runs means every sample point voting on that slice can still be sitting
+ * inside the same unlucky stretch — a long stretch of score or action-scene
+ * sound design at whatever point the slice happened to start, for instance,
+ * which is a common shape for series/movie audio. Callers that can afford
+ * to pull a few short clips instead of one (e.g. via ffmpeg stream-copy,
+ * which is cheap) should prefer this for long source files.
+ */
+export async function detectLanguageAcrossClips(blobs, { onModelProgress } = {}) {
+  const transcriber = await getTranscriber("lid", "auto", onModelProgress);
+  const detections = [];
+  for (const blob of blobs) {
+    const audioFloat32 = await decodeAudioTo16kMono(blob);
+    const totalSeconds = audioFloat32.length / SAMPLE_RATE;
+    // Each clip is already a short, targeted slice, so just pick the
+    // loudest window(s) within it rather than re-spreading across it.
+    const offsets = pickSpeechyOffsets(audioFloat32, totalSeconds, { count: 1 });
+    for (const offsetSeconds of offsets) {
+      detections.push(await detectLanguage(transcriber, audioFloat32, { offsetSeconds }));
+    }
+  }
+  return tallyDetections(detections);
 }
 
 /**

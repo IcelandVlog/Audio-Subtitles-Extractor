@@ -384,29 +384,40 @@ export function useTrackQueue() {
       });
 
       try {
-        // Skip a likely-non-speech lead-in (logo/silence/instrumental
-        // intro) when the video is long enough to spare it — sampling from
-        // time zero on a video that opens with a studio logo is a common
-        // way to get the wrong language back. Only applies to a fresh
-        // extraction; an already-cached `native` blob (the whole track) is
-        // handled by detectAudioBlobLanguage's own offset instead.
-        const duration = track.duration || 0;
-        const startSeconds = duration > 40 ? Math.min(20, duration * 0.15) : 0;
-
-        const sampleBlob =
-          stream.native?.blob ||
-          (await extractAudioSample({
-            inputName: track.inputName,
-            streamIndex,
-            codec: stream.codec,
-            startSeconds,
-          }));
-
         // Heavy (transformers.js + onnxruntime-web) — only pulled in the
         // first time someone actually clicks "Detect language", same as the
         // Video → Subtitles tool does for the transcriber itself.
-        const { detectAudioBlobLanguage } = await import("./subtitle/transcribe");
-        const detected = await detectAudioBlobLanguage(sampleBlob);
+        const { detectAudioBlobLanguage, detectLanguageAcrossClips } = await import("./subtitle/transcribe");
+
+        let detected;
+        if (stream.native?.blob) {
+          // Already have the whole track — detectAudioBlobLanguage samples
+          // several loudness-picked points within it itself.
+          detected = await detectAudioBlobLanguage(stream.native.blob);
+        } else {
+          // No cached track yet: pull a handful of short clips from points
+          // spread across the *real* duration (not just one slice near the
+          // start) via cheap stream-copy, so a long stretch of score,
+          // action, or ambient sound at any one point — common in a
+          // series/movie file — can't single-handedly decide the result.
+          const duration = track.duration || 0;
+          const startPoints =
+            duration > 40 ? [Math.min(20, duration * 0.15), duration * 0.45, duration * 0.75] : [0];
+
+          const sampleBlobs = [];
+          for (const startSeconds of startPoints) {
+            sampleBlobs.push(
+              await extractAudioSample({
+                inputName: track.inputName,
+                streamIndex,
+                codec: stream.codec,
+                seconds: 30,
+                startSeconds,
+              })
+            );
+          }
+          detected = await detectLanguageAcrossClips(sampleBlobs);
+        }
 
         if (!detected) {
           patchStream(trackId, "audio", streamIndex, { languageDetectStatus: "error" });
