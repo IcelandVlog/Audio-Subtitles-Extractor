@@ -181,9 +181,14 @@ export async function detectLanguage(transcriber, audioFloat32, { offsetSeconds 
     const confidence = Math.exp(bestScore - max) / sumExp;
 
     return { code: bestCode, confidence };
-  } catch {
+  } catch (err) {
     // Detection is a nice-to-have — if anything about the runtime/model
-    // shape doesn't match what we expect, just skip it silently.
+    // shape doesn't match what we expect, don't blow up the caller. But log
+    // it: silently returning null here means every failure just looks like
+    // "couldn't confidently identify the language" with zero trace, even in
+    // devtools, which makes real bugs (wrong tensor shape, missing session
+    // input, WebGPU/CPU tensor mismatch, etc.) impossible to diagnose.
+    console.error("[detectLanguage] failed:", err);
     return null;
   }
 }
