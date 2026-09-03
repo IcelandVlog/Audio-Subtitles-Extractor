@@ -193,6 +193,28 @@ export async function detectLanguage(transcriber, audioFloat32, { offsetSeconds 
   }
 }
 
+// A single sampled window is fragile: land it on a musical intro, a sound
+// effect, silence, or just an unlucky stretch of audio and Whisper's
+// language-ID step will confidently return the *wrong* language for the
+// whole clip — a well-known weak spot of the smaller checkpoints, not
+// something a single "skip the intro" offset can fully guard against.
+// Spreading a few sample points across the clip and letting them vote is
+// far more robust than trusting whichever window happened to be tried.
+function pickSampleOffsets(totalSeconds) {
+  if (totalSeconds <= 20) return [0]; // too short to do anything but use it all
+  // Skip the very start (most likely to be a logo/silence/instrumental
+  // intro), then take a few more spread through the rest of the clip so one
+  // bad window can't single-handedly decide the result.
+  const candidates = [
+    Math.min(10, totalSeconds * 0.15),
+    totalSeconds * 0.45,
+    totalSeconds * 0.75,
+  ];
+  // Keep only offsets that leave enough audio after them to be worth sampling.
+  const offsets = candidates.filter((o) => totalSeconds - o > 3);
+  return offsets.length ? offsets : [0];
+}
+
 /**
  * Identifies the spoken language of a short standalone audio clip — the
  * "Detect language" button on an extracted audio track, as opposed to
@@ -201,18 +223,46 @@ export async function detectLanguage(transcriber, audioFloat32, { offsetSeconds 
  * checkpoint — language ID is only one encoder pass + one decoder step
  * regardless of model size, so the accuracy jump from tiny → base costs
  * almost nothing here, unlike full transcription where it matters a lot.
- * Also skips a short lead-in on longer clips (see detectLanguage's offset
- * note above) before decoding the whole clip itself, so callers just hand
- * it a Blob and get back `{ code, confidence }` or `null`.
+ * Samples a handful of points spread across the clip (see pickSampleOffsets)
+ * and lets them vote rather than trusting a single window, so callers just
+ * hand it a Blob and get back the majority-agreed `{ code, confidence }`
+ * (confidence averaged over the windows that agreed), or `null` if nothing
+ * could be detected at all.
  */
 export async function detectAudioBlobLanguage(blob, { onModelProgress } = {}) {
   const transcriber = await getTranscriber("balanced", "auto", onModelProgress);
   const audioFloat32 = await decodeAudioTo16kMono(blob);
   const totalSeconds = audioFloat32.length / SAMPLE_RATE;
-  // Only skip ahead when the clip is comfortably longer than the skip
-  // itself — a short clip is more likely to be all we've got, intro or not.
-  const offsetSeconds = totalSeconds > 20 ? Math.min(10, totalSeconds * 0.15) : 0;
-  return detectLanguage(transcriber, audioFloat32, { offsetSeconds });
+
+  const offsets = pickSampleOffsets(totalSeconds);
+  const votes = new Map(); // code -> { count, totalConfidence }
+
+  for (const offsetSeconds of offsets) {
+    const detected = await detectLanguage(transcriber, audioFloat32, { offsetSeconds });
+    if (!detected) continue;
+    const entry = votes.get(detected.code) || { count: 0, totalConfidence: 0 };
+    entry.count += 1;
+    entry.totalConfidence += detected.confidence;
+    votes.set(detected.code, entry);
+  }
+
+  if (votes.size === 0) return null;
+
+  // Majority vote wins; ties broken by whichever had the higher average
+  // confidence across the windows that picked it.
+  let bestCode = null;
+  let bestCount = -1;
+  let bestAvgConfidence = -1;
+  for (const [code, { count, totalConfidence }] of votes) {
+    const avgConfidence = totalConfidence / count;
+    if (count > bestCount || (count === bestCount && avgConfidence > bestAvgConfidence)) {
+      bestCode = code;
+      bestCount = count;
+      bestAvgConfidence = avgConfidence;
+    }
+  }
+
+  return { code: bestCode, confidence: bestAvgConfidence };
 }
 
 /**
