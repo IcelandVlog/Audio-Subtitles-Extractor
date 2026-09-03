@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import JSZip from "jszip";
 import {
   probeFile,
+  prefetchFileBytes,
   extractSubtitle,
   cleanupInput,
   loadEngine,
@@ -127,6 +128,14 @@ export function useTrackQueue() {
     tracksRef.current = tracks;
   }, [tracks]);
 
+  // Bytes for each queued file, captured the moment it's added rather than
+  // whenever its turn comes up in the (strictly serial, one-file-at-a-time)
+  // ffmpeg queue below. Dropping/selecting a big batch means files near the
+  // back would otherwise sit untouched for minutes before being read, which
+  // is what was triggering "could not be read... permission problems" on
+  // large batches — see prefetchFileBytes in ffmpegEngine.js.
+  const prefetchMap = useRef(new Map());
+
   const patchTrack = useCallback((id, patch) => {
     setTracks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
   }, []);
@@ -199,6 +208,13 @@ export function useTrackQueue() {
         inputName: null,
       }));
 
+      // Kick off byte reads for every newly-added file right away, on their
+      // own small concurrency-limited queue — independent of, and running
+      // ahead of, the strictly-serial ffmpeg probing loop below.
+      newTracks.forEach((t) => {
+        prefetchMap.current.set(t.id, prefetchFileBytes(t.file));
+      });
+
       setTracks((prev) => [...prev, ...newTracks]);
       // newly-added files aren't in any previously-built "all files" zip —
       // clear it so Download-all goes back to offering a fresh Extract.
@@ -227,7 +243,9 @@ export function useTrackQueue() {
       for (const t of newTracks) {
         patchTrack(t.id, { status: "uploading", uploadProgress: 0 });
         try {
+          const prefetch = prefetchMap.current.get(t.id);
           const { inputName, streams, duration } = await probeFile(t.file, {
+            prefetch,
             onProgress: (p) => patchTrack(t.id, { uploadProgress: p }),
             onUploaded: () => patchTrack(t.id, { status: "probing" }),
           });
@@ -244,6 +262,8 @@ export function useTrackQueue() {
           console.error("[probe] failed:", err);
           const detail = err?.message ? `: ${err.message}` : "";
           patchTrack(t.id, { status: "error", error: `Couldn't read this file${detail}` });
+        } finally {
+          prefetchMap.current.delete(t.id);
         }
       }
     },
@@ -271,6 +291,7 @@ export function useTrackQueue() {
   );
 
   const removeTrack = useCallback((id) => {
+    prefetchMap.current.delete(id);
     setTracks((prev) => {
       const t = prev.find((x) => x.id === id);
       if (t?.inputName) cleanupInput(t.inputName);

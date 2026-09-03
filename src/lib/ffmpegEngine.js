@@ -155,16 +155,76 @@ function readFileWithProgress(file, onProgress) {
   });
 }
 
+// Chrome (and Windows in particular) can invalidate a File object's
+// underlying handle if too much time passes between *acquiring* it (drop
+// event / file picker) and actually *reading* it — surfacing as "The
+// requested file could not be read, typically due to permission problems
+// that have occurred after a reference to a file was acquired." This is
+// exactly what happens when many files are queued at once: probeFile runs
+// through runExclusive one file at a time behind a single ffmpeg worker, so
+// a file near the back of a big batch can sit untouched for minutes before
+// its turn comes up, and by then its handle is gone. There's no way to
+// "revive" an invalidated File — the fix is to shrink that gap by reading
+// each file's bytes into memory as soon as it's added, on its own small
+// concurrency-limited queue that runs independently of (and in parallel
+// with) the strictly-serial ffmpeg processing queue above.
+const PREFETCH_CONCURRENCY = 3;
+let prefetchActive = 0;
+const prefetchWaiters = [];
+function acquirePrefetchSlot() {
+  if (prefetchActive < PREFETCH_CONCURRENCY) {
+    prefetchActive++;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => prefetchWaiters.push(resolve));
+}
+function releasePrefetchSlot() {
+  const next = prefetchWaiters.shift();
+  if (next) next();
+  else prefetchActive--;
+}
+
+/**
+ * Start reading a file's bytes into memory right away, independent of the
+ * ffmpeg processing queue. Returns null for files too big to prefetch into
+ * memory (those use the lazy WORKERFS mount instead, which reads directly
+ * off the live File object at extraction time — see mountInputFile). Call
+ * this immediately when a file is added, not when it's about to be probed.
+ */
+export function prefetchFileBytes(file) {
+  if (file.size > MEMFS_SAFE_BYTES) return null;
+  return acquirePrefetchSlot().then(() =>
+    readFileWithProgress(file, null).finally(releasePrefetchSlot)
+  );
+}
+
+const NOT_READABLE_HINT =
+  "The file became unreadable while it was waiting in the queue (common when a lot of " +
+  "files are added at once). Try adding fewer files at a time, or re-add just this one.";
+
 /** Run `ffmpeg -i` (which always "fails" with no output) purely to read its stream report. */
-export function probeFile(file, { onProgress, onUploaded } = {}) {
+export function probeFile(file, { onProgress, onUploaded, prefetch } = {}) {
   return runExclusive(async () => {
     const ffmpeg = await loadEngine();
     let inputName;
     if (file.size <= MEMFS_SAFE_BYTES) {
       // Fast path: whole file fits comfortably in the wasm heap, so a plain
-      // in-memory copy — no per-chunk read overhead — is quickest.
+      // in-memory copy — no per-chunk read overhead — is quickest. Prefer
+      // bytes already captured by prefetchFileBytes (started the moment the
+      // file was added) over touching the File object again now, since by
+      // the time this runs the File may be several other-files'-worth of
+      // processing time removed from when it was first acquired.
       inputName = safeName(file.name);
-      const data = await readFileWithProgress(file, onProgress);
+      let data;
+      try {
+        data = prefetch ? await prefetch : await readFileWithProgress(file, onProgress);
+      } catch (err) {
+        if (/could not be read/i.test(err?.message || "")) {
+          throw new Error(NOT_READABLE_HINT);
+        }
+        throw err;
+      }
+      onProgress?.(1);
       await ffmpeg.writeFile(inputName, data);
     } else {
       // Fallback for files too big to fit in memory at all.
