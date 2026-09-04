@@ -26,6 +26,7 @@ export default function TrackCard({
   onDownloadAllSubtitles,
   onOpenDetectTool,
   onRemove,
+  onRetry,
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [preview, setPreview] = useState(null); // extracted subtitle text currently shown in the modal, or null
@@ -144,6 +145,7 @@ export default function TrackCard({
             title="Audio tracks"
             streams={audioStreams}
             disabled={notReady || busy}
+            probeFailed={status === "error"}
             allStatus={audioAllStatus}
             allProgress={audioAllProgress}
             onExtractOne={(streamIndex) => onExtractOneAudio(id, streamIndex)}
@@ -158,6 +160,7 @@ export default function TrackCard({
             title="Subtitle tracks"
             streams={subtitleStreams}
             disabled={notReady || busy}
+            probeFailed={status === "error"}
             allStatus={subsAllStatus}
             allProgress={subsAllProgress}
             onExtractOne={(streamIndex) => onExtractOneSubtitle(id, streamIndex)}
@@ -170,7 +173,23 @@ export default function TrackCard({
         </div>
       )}
 
-      {status === "error" && <p className="track__error">{error}</p>}
+      {status === "error" && (
+        <div className="track__error-row">
+          <p className="track__error">{error}</p>
+          {onRetry && (
+            <button
+              type="button"
+              className="btn btn--ghost track__retry"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRetry(id);
+              }}
+            >
+              Retry
+            </button>
+          )}
+        </div>
+      )}
       {status !== "error" && warning && <p className="track__warning">{warning}</p>}
 
       {preview != null && <SubtitlePreviewModal text={preview} onClose={() => setPreview(null)} />}

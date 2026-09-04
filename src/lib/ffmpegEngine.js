@@ -190,12 +190,72 @@ function releasePrefetchSlot() {
  * memory (those use the lazy WORKERFS mount instead, which reads directly
  * off the live File object at extraction time — see mountInputFile). Call
  * this immediately when a file is added, not when it's about to be probed.
+ *
+ * `onProgress` (0..1) fires as bytes come in, even though this can run long
+ * before probeFile ever looks at the track — otherwise the UI has nothing to
+ * show until the (possibly already-finished) prefetch resolves, and the
+ * progress bar appears to jump straight from 0% to 100%.
+ *
+ * Retries once on the classic Chrome "requested file could not be read"
+ * error, since that's sometimes a transient hiccup (e.g. antivirus still
+ * scanning a just-downloaded file) rather than a truly invalidated handle —
+ * costs nothing when the file really is unreadable, since the retry just
+ * fails the same way immediately after.
  */
-export function prefetchFileBytes(file) {
+export function prefetchFileBytes(file, onProgress) {
   if (file.size > MEMFS_SAFE_BYTES) return null;
-  return acquirePrefetchSlot().then(() =>
-    readFileWithProgress(file, null).finally(releasePrefetchSlot)
-  );
+  return acquirePrefetchSlot().then(async () => {
+    try {
+      try {
+        return await readFileWithProgress(file, onProgress);
+      } catch (err) {
+        if (!/could not be read/i.test(err?.message || "")) throw err;
+        await new Promise((r) => setTimeout(r, 800));
+        return await readFileWithProgress(file, onProgress);
+      }
+    } finally {
+      releasePrefetchSlot();
+    }
+  });
+}
+
+/** Last few non-empty lines of an ffmpeg log — usually where the real error is. */
+function tailOfLog(log) {
+  const lines = log.split("\n").map((l) => l.trim()).filter(Boolean);
+  return lines.slice(-3).join(" ");
+}
+
+/**
+ * Run `ffmpeg.exec` while capturing its log, so that when it fails (either by
+ * throwing or — depending on the wasm build — just returning a non-zero exit
+ * code with the output file never written) the caller gets ffmpeg's own
+ * explanation instead of a generic "Extraction failed." This is what makes it
+ * possible to tell, from the UI, *why* a run that reported progress right up
+ * to 100% still ended in an error (bad stream map, unsupported codec for the
+ * target container, out of memory, etc.) instead of just that it did.
+ */
+async function execCapturingLog(ffmpeg, args) {
+  let log = "";
+  const collector = ({ message }) => {
+    log += message + "\n";
+  };
+  ffmpeg.on("log", collector);
+  try {
+    const code = await ffmpeg.exec(args);
+    if (code) {
+      throw new Error(tailOfLog(log) || `ffmpeg exited with code ${code}`);
+    }
+  } catch (err) {
+    const tail = tailOfLog(log);
+    if (tail && !String(err?.message || "").includes(tail)) {
+      const wrapped = new Error(tail);
+      wrapped.cause = err;
+      throw wrapped;
+    }
+    throw err;
+  } finally {
+    ffmpeg.off("log", collector);
+  }
 }
 
 const NOT_READABLE_HINT =
@@ -329,7 +389,7 @@ export function extractAudioNative({ inputName, streamIndex, codec, onProgress }
     };
     ffmpeg.on("progress", progressHandler);
     try {
-      await ffmpeg.exec([
+      await execCapturingLog(ffmpeg, [
         ...FAST_OPEN_ARGS,
         "-i",
         inputName,
@@ -412,7 +472,7 @@ export function convertAudioFromNative({ nativeBlob, nativeExtension, streamInde
     };
     ffmpeg.on("progress", progressHandler);
     try {
-      await ffmpeg.exec(["-i", inputName, ...encoderArgs, outputName]);
+      await execCapturingLog(ffmpeg, ["-i", inputName, ...encoderArgs, outputName]);
       const outData = await ffmpeg.readFile(outputName);
       return new Blob([outData.buffer], { type: `audio/${format}` });
     } finally {
@@ -560,7 +620,7 @@ export function extractAudio({ inputName, streamIndex, format, onProgress }) {
     };
     ffmpeg.on("progress", progressHandler);
     try {
-      await ffmpeg.exec([...FAST_OPEN_ARGS, "-i", inputName, ...mapArgs, "-vn", ...encoderArgs, outputName]);
+      await execCapturingLog(ffmpeg, [...FAST_OPEN_ARGS, "-i", inputName, ...mapArgs, "-vn", ...encoderArgs, outputName]);
     } finally {
       ffmpeg.off("progress", progressHandler);
     }
@@ -667,7 +727,7 @@ export function extractSubtitle({ inputName, streamIndex, codec, onProgress }) {
       if (isText) {
         const outputName = `subs_${streamIndex}.srt`;
         try {
-          await ffmpeg.exec([...FAST_OPEN_ARGS, "-i", inputName, "-map", `0:${streamIndex}`, "-c:s", "srt", outputName]);
+          await execCapturingLog(ffmpeg, [...FAST_OPEN_ARGS, "-i", inputName, "-map", `0:${streamIndex}`, "-c:s", "srt", outputName]);
           const data = await ffmpeg.readFile(outputName);
           await ffmpeg.deleteFile(outputName);
           return { blob: new Blob([data.buffer], { type: "text/srt" }), extension: "srt" };
@@ -683,7 +743,7 @@ export function extractSubtitle({ inputName, streamIndex, codec, onProgress }) {
       const execArgs = [...FAST_OPEN_ARGS, "-i", inputName, "-map", `0:${streamIndex}`, "-c:s", "copy"];
       if (format) execArgs.push("-f", format);
       execArgs.push(outputName);
-      await ffmpeg.exec(execArgs);
+      await execCapturingLog(ffmpeg, execArgs);
       const data = await ffmpeg.readFile(outputName);
       await ffmpeg.deleteFile(outputName);
       return { blob: new Blob([data.buffer]), extension };

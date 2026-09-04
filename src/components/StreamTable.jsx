@@ -8,6 +8,7 @@ export default function StreamTable({
   title,
   streams,
   disabled,
+  probeFailed,
   allStatus,
   allProgress,
   onExtractOne,
@@ -102,7 +103,7 @@ export default function StreamTable({
       <div className="stream-table__body">
         {!hasStreams ? (
           <p className="stream-table__empty">
-            {disabled ? "checking…" : `no ${kind} tracks found`}
+            {probeFailed ? "—" : disabled ? "checking…" : `no ${kind} tracks found`}
           </p>
         ) : (
           <ul className="stream-table__rows">

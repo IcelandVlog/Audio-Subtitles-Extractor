@@ -9,6 +9,7 @@ export default function Home() {
     engineState,
     engineError,
     addFiles,
+    retryTrack,
     setAudioFormat,
     removeTrack,
     extractOneAudio,
@@ -72,6 +73,7 @@ export default function Home() {
               onExtractAllSubtitles={extractAllSubtitles}
               onDownloadAllSubtitles={downloadAllSubtitles}
               onRemove={removeTrack}
+              onRetry={retryTrack}
             />
           ))}
         </section>

@@ -189,7 +189,11 @@ export function useTrackQueue() {
         file,
         name: file.name,
         size: file.size,
-        status: "queued", // queued | uploading | probing | ready | error
+        // Reading starts immediately (see prefetchFileBytes below), not once
+        // this file's turn comes up in the probing loop, so the status
+        // starts at "uploading" straight away rather than sitting at
+        // "queued" while bytes are already being read in the background.
+        status: "uploading", // uploading | probing | ready | error
         uploadProgress: 0,
         duration: null,
         audioStreams: [],
@@ -210,9 +214,16 @@ export function useTrackQueue() {
 
       // Kick off byte reads for every newly-added file right away, on their
       // own small concurrency-limited queue — independent of, and running
-      // ahead of, the strictly-serial ffmpeg probing loop below.
+      // ahead of, the strictly-serial ffmpeg probing loop below. Report real
+      // progress as bytes come in (rather than only once probeFile later
+      // awaits the same promise) — otherwise a file whose prefetch finishes
+      // before its turn in the probing loop appears to jump straight from 0%
+      // to 100% instead of showing any real progress.
       newTracks.forEach((t) => {
-        prefetchMap.current.set(t.id, prefetchFileBytes(t.file));
+        prefetchMap.current.set(
+          t.id,
+          prefetchFileBytes(t.file, (p) => patchTrack(t.id, { uploadProgress: p }))
+        );
       });
 
       setTracks((prev) => [...prev, ...newTracks]);
@@ -239,9 +250,12 @@ export function useTrackQueue() {
         return;
       }
 
-      // probe files one at a time — they all share the single ffmpeg instance
+      // probe files one at a time — they all share the single ffmpeg instance.
+      // Status is already "uploading" from the moment the file was added
+      // (prefetch runs independently, ahead of this loop) — don't reset
+      // uploadProgress here, or a file whose prefetch already finished (or
+      // made headway) waiting for its turn would visibly snap back to 0%.
       for (const t of newTracks) {
-        patchTrack(t.id, { status: "uploading", uploadProgress: 0 });
         try {
           const prefetch = prefetchMap.current.get(t.id);
           const { inputName, streams, duration } = await probeFile(t.file, {
@@ -265,6 +279,41 @@ export function useTrackQueue() {
         } finally {
           prefetchMap.current.delete(t.id);
         }
+      }
+    },
+    [ensureEngine, patchTrack]
+  );
+
+  // Re-run probing for a single track that failed (e.g. the "could not be
+  // read" file-handle error) without having to remove it and re-drop the
+  // whole batch. Reuses the File reference already held on the track — works
+  // when the failure was transient, but can't do anything for a genuinely
+  // invalidated handle (the browser gives no way to "revive" one; at that
+  // point the file has to be re-selected from disk).
+  const retryTrack = useCallback(
+    async (trackId) => {
+      const track = tracksRef.current.find((t) => t.id === trackId);
+      if (!track || track.status !== "error" || track.status === "probing") return;
+
+      patchTrack(trackId, { status: "uploading", uploadProgress: 0, error: null });
+      const prefetch = prefetchFileBytes(track.file, (p) => patchTrack(trackId, { uploadProgress: p }));
+      prefetchMap.current.set(trackId, prefetch);
+      try {
+        await ensureEngine();
+        const { inputName, streams, duration } = await probeFile(track.file, {
+          prefetch,
+          onProgress: (p) => patchTrack(trackId, { uploadProgress: p }),
+          onUploaded: () => patchTrack(trackId, { status: "probing" }),
+        });
+        const audioStreams = streams.filter((s) => s.type === "Audio").map(makeAudioStream);
+        const subtitleStreams = streams.filter((s) => s.type === "Subtitle").map(makeSubtitleStream);
+        patchTrack(trackId, { status: "ready", inputName, duration, audioStreams, subtitleStreams });
+      } catch (err) {
+        console.error("[retry] probe failed:", err);
+        const detail = err?.message ? `: ${err.message}` : "";
+        patchTrack(trackId, { status: "error", error: `Couldn't read this file${detail}` });
+      } finally {
+        prefetchMap.current.delete(trackId);
       }
     },
     [ensureEngine, patchTrack]
@@ -369,8 +418,10 @@ export function useTrackQueue() {
           });
           return { blob, extension };
         }
-      } catch {
-        patchStream(trackId, kind, streamIndex, { status: "error", error: "Extraction failed." });
+      } catch (err) {
+        console.error(`[extractOneStream:${kind}] stream ${streamIndex} failed:`, err);
+        const detail = err?.message ? `: ${err.message}` : "";
+        patchStream(trackId, kind, streamIndex, { status: "error", error: `Extraction failed${detail}` });
         return null;
       }
     },
@@ -588,7 +639,8 @@ export function useTrackQueue() {
             }
           } catch (streamErr) {
             console.error(`[extractAll:${kind}] stream ${stream.index} failed:`, streamErr);
-            patchStream(trackId, kind, stream.index, { status: "error", error: "Extraction failed." });
+            const detail = streamErr?.message ? `: ${streamErr.message}` : "";
+            patchStream(trackId, kind, stream.index, { status: "error", error: `Extraction failed${detail}` });
           }
           perStreamProgress[i] = 1;
           reportOverall();
@@ -848,6 +900,7 @@ export function useTrackQueue() {
     engineState,
     engineError,
     addFiles,
+    retryTrack,
     setAudioFormat,
     removeTrack,
     extractOneAudio,
