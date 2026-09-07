@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { TOOLS, CATEGORY_LABELS } from "../lib/subtitle";
+import SupInspectModal from "./SupInspectModal";
 
 export default function ToolPage({ toolId, onHome }) {
   const tool = TOOLS[toolId];
@@ -12,6 +13,9 @@ export default function ToolPage({ toolId, onHome }) {
   const [fileProgress, setFileProgress] = useState([]);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
+  // Index into result.inspect of the file currently open in the Inspect
+  // view (sup-to-srt only) — null when no inspect modal is open.
+  const [inspectIndex, setInspectIndex] = useState(null);
   const inputRef = useRef(null);
 
   if (!tool) {
@@ -54,6 +58,7 @@ export default function ToolPage({ toolId, onHome }) {
     setResult(null);
     setError("");
     setFileProgress([]);
+    setInspectIndex(null);
   };
 
   const removeFile = (index) => {
@@ -62,6 +67,7 @@ export default function ToolPage({ toolId, onHome }) {
     setResult(null);
     setError("");
     setFileProgress([]);
+    setInspectIndex(null);
   };
 
   const moveFile = (index, dir) => {
@@ -79,6 +85,7 @@ export default function ToolPage({ toolId, onHome }) {
     setProgress(0);
     setFileProgress(isMulti ? files.map(() => 0) : []);
     setError("");
+    setInspectIndex(null);
     try {
       const out = await tool.run(files, options, (p, info) => {
         setProgress(p);
@@ -117,6 +124,7 @@ export default function ToolPage({ toolId, onHome }) {
     setError("");
     setResult(null);
     setFileProgress([]);
+    setInspectIndex(null);
   };
 
   return (
@@ -286,7 +294,29 @@ export default function ToolPage({ toolId, onHome }) {
                 Download
               </button>
             </div>
+            {result.inspect && (
+              <ul className="tool-modal__inspectlist">
+                {result.inspect.map((entry, i) => (
+                  <li key={`${entry.fileName}-${i}`}>
+                    <span className="tool-modal__filename" title={entry.fileName}>
+                      {entry.fileName}
+                    </span>
+                    <button
+                      type="button"
+                      className="tool-modal__inspect-btn"
+                      onClick={() => setInspectIndex(i)}
+                    >
+                      Inspect 🔍
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </>
+        )}
+
+        {inspectIndex !== null && result?.inspect?.[inspectIndex] && (
+          <SupInspectModal fileEntry={result.inspect[inspectIndex]} onClose={() => setInspectIndex(null)} />
         )}
 
         <div className="tool-modal__actions">

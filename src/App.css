@@ -1552,6 +1552,221 @@
   white-space: nowrap;
 }
 
+.tool-modal__inspectlist {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tool-modal__inspectlist li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.tool-modal__inspectlist .tool-modal__filename {
+  font-size: 13px;
+}
+
+.tool-modal__inspect-btn {
+  flex: 0 0 auto;
+  background: none;
+  border: 1px solid var(--phosphor-dim);
+  color: var(--phosphor);
+  border-radius: 999px;
+  padding: 5px 14px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tool-modal__inspect-btn:hover {
+  background: var(--surface-hover);
+  border-color: var(--phosphor);
+}
+
+/* ---------- sup inspect modal ---------- */
+
+.inspect-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(6, 8, 6, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 100;
+}
+
+.inspect-modal {
+  width: 100%;
+  max-width: 920px;
+  max-height: 88vh;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.inspect-modal__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0;
+}
+
+.inspect-modal__head-info {
+  min-width: 0;
+}
+
+.inspect-modal__head-info h3 {
+  margin: 0 0 2px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspect-modal__count {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.inspect-modal__head-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.inspect-modal__download {
+  background: var(--phosphor);
+  color: #05130c;
+  border: none;
+  border-radius: 999px;
+  padding: 7px 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.inspect-modal__close {
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 10px;
+  margin: -10px;
+  line-height: 1;
+  transition: color 0.15s ease;
+}
+
+.inspect-modal__close:hover {
+  color: var(--red);
+}
+
+.inspect-modal__body {
+  overflow-y: auto;
+  padding: 14px 20px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.inspect-row {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.inspect-row:last-child {
+  border-bottom: none;
+}
+
+.inspect-row__meta {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 11px;
+}
+
+.inspect-row__index {
+  color: var(--text-faint);
+  font-weight: 700;
+}
+
+.inspect-row__time {
+  color: var(--phosphor);
+  font-family: var(--font-mono);
+}
+
+.inspect-row__content {
+  display: flex;
+  gap: 14px;
+  align-items: stretch;
+}
+
+.inspect-row__image {
+  flex: 1 1 55%;
+  min-width: 0;
+  max-width: 55%;
+  height: auto;
+  max-height: 140px;
+  object-fit: contain;
+  background: #fff;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft);
+}
+
+.inspect-row__text {
+  flex: 1 1 45%;
+  min-width: 0;
+  resize: vertical;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 8px 10px;
+}
+
+.inspect-row__text:focus {
+  outline: none;
+  border-color: var(--phosphor-dim);
+  box-shadow: 0 0 0 1px var(--phosphor-glow) inset;
+}
+
+@media (max-width: 640px) {
+  .inspect-row__content {
+    flex-direction: column;
+  }
+  .inspect-row__image {
+    max-width: 100%;
+  }
+}
+
 .tool-modal__actions {
   display: flex;
   justify-content: flex-end;

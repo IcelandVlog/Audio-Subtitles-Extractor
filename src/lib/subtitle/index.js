@@ -87,7 +87,7 @@ export const TOOLS = {
     showPercent: true,
     progressLabel: "Running OCR",
     progressSuffix: "this can take a minute",
-    hint: "PGS/Blu-ray bitmap subtitles (.sup). Runs OCR in your browser — larger files take a while, and accuracy depends on image quality. Add more than one file to convert them all in one go — they come back as a single zip.",
+    hint: "PGS/Blu-ray bitmap subtitles (.sup). Runs OCR in your browser — larger files take a while, and accuracy depends on image quality. Add more than one file to convert them all in one go — they come back as a single zip. Use Inspect afterwards to see every subtitle image next to its OCR'd text and fix anything it got wrong.",
     async run(files, options, onProgress) {
       // Files are still converted one at a time (not in parallel with each
       // other) — each file's OCR pass already spreads its own frames across
@@ -95,25 +95,35 @@ export const TOOLS = {
       // concurrently on top of that would just multiply how many worker
       // pools sit in memory at once for no real speed gain.
       const results = [];
+      // Per-file frame-by-frame data (image + OCR text) for the Inspect
+      // view — kept separate from `results` (the actual .srt/.zip download)
+      // since it includes every frame, not just the ones OCR read text from.
+      const inspect = [];
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const buf = await file.arrayBuffer();
         const frames = await parsePgs(buf);
-        const cues = await ocrFramesToCues(frames, {
+        const { cues, frames: frameRows } = await ocrFramesToCues(frames, {
           lang: options.lang || "eng",
           onProgress: (p) => onProgress?.((i + p) / files.length, { index: i, fraction: p }),
+          withFrames: true,
         });
-        results.push({ name: `${baseName(file.name)}.srt`, blob: new Blob([toSrtText(cues)], { type: "text/plain" }) });
+        const srtName = `${baseName(file.name)}.srt`;
+        results.push({ name: srtName, blob: new Blob([toSrtText(cues)], { type: "text/plain" }) });
+        inspect.push({ fileName: file.name, srtName, frames: frameRows });
       }
 
+      let out;
       if (results.length === 1) {
-        return download(results[0].name, results[0].blob, "text/plain");
+        out = download(results[0].name, results[0].blob, "text/plain");
+      } else {
+        const zip = new JSZip();
+        for (const r of results) zip.file(r.name, r.blob);
+        const zipBlob = await zip.generateAsync({ type: "blob" });
+        out = download("sup-to-srt.zip", zipBlob, "application/zip");
       }
-
-      const zip = new JSZip();
-      for (const r of results) zip.file(r.name, r.blob);
-      const zipBlob = await zip.generateAsync({ type: "blob" });
-      return download("sup-to-srt.zip", zipBlob, "application/zip");
+      out.inspect = inspect;
+      return out;
     },
   },
 

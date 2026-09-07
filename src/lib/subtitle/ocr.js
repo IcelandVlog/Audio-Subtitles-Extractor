@@ -73,8 +73,14 @@ function preprocessFrameForOcr(sourceCanvas) {
 // N CPU cores in parallel — this is the main lever for making a .sup with
 // hundreds of frames convert several times faster instead of chewing through
 // them serially.
-export async function ocrFramesToCues(frames, { lang = "eng", onProgress, concurrency } = {}) {
-  if (!frames.length) return [];
+//
+// Pass `withFrames: true` to also get back EVERY frame (including the ones
+// that OCR'd to empty text, and each one's source image as a data URL) - the
+// "Inspect" view uses this so a person can review/manually fill in the
+// frames OCR missed, instead of only ever seeing the ones that already
+// worked.
+export async function ocrFramesToCues(frames, { lang = "eng", onProgress, concurrency, withFrames = false } = {}) {
+  if (!frames.length) return withFrames ? { cues: [], frames: [] } : [];
 
   const total = frames.length;
   // Cap the pool: bounded by how many logical cores the machine reports, how
@@ -127,6 +133,7 @@ export async function ocrFramesToCues(frames, { lang = "eng", onProgress, concur
   // pushed as they finish, so the output stays in chronological order even
   // though frames complete out of order across the parallel workers.
   const results = new Array(total);
+  const frameRows = withFrames ? new Array(total) : null;
   let nextIndex = 0;
 
   const runSlot = async (slot) => {
@@ -141,6 +148,14 @@ export async function ocrFramesToCues(frames, { lang = "eng", onProgress, concur
       } = await worker.recognize(ocrCanvas);
       const clean = text.replace(/\s+/g, " ").trim();
       results[i] = clean ? { start: frame.startMs, end: frame.endMs, text: clean } : null;
+      if (frameRows) {
+        frameRows[i] = {
+          start: frame.startMs,
+          end: frame.endMs,
+          text: clean,
+          image: frame.canvas.toDataURL("image/png"),
+        };
+      }
       inFlightFraction[slot] = 0;
       completedFrames += 1;
       reportProgress();
@@ -153,5 +168,6 @@ export async function ocrFramesToCues(frames, { lang = "eng", onProgress, concur
     await Promise.all(workers.map((w) => w.terminate()));
   }
 
-  return results.filter(Boolean);
+  const cues = results.filter(Boolean);
+  return withFrames ? { cues, frames: frameRows } : cues;
 }
