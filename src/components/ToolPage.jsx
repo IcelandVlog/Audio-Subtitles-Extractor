@@ -288,6 +288,12 @@ export default function ToolPage({ toolId, onHome }) {
         {status === "done" && result && (
           <>
             {result.note && <p className="tool-page__hint">{result.note}</p>}
+            <div className="tool-modal__result">
+              <span>Done — {result.filename}</span>
+              <button type="button" className="tool-modal__download" onClick={handleDownload}>
+                Download
+              </button>
+            </div>
             {result.inspect && (
               <ul className="tool-modal__inspectlist">
                 {result.inspect.map((entry, i) => (
@@ -306,12 +312,6 @@ export default function ToolPage({ toolId, onHome }) {
                 ))}
               </ul>
             )}
-            <div className="tool-modal__result">
-              <span>Done — {result.filename}</span>
-              <button type="button" className="tool-modal__download" onClick={handleDownload}>
-                Download
-              </button>
-            </div>
           </>
         )}
 
