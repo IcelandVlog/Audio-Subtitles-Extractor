@@ -127,7 +127,32 @@ export async function ocrFramesToCues(frames, { lang = "eng", onProgress, concur
   // front (instead of leaving it to guess the page layout per frame) avoids
   // a class of misreads where it tries to segment the image into columns/
   // paragraphs that aren't there.
-  await Promise.all(workers.map((w) => w.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_BLOCK })));
+  //
+  // Dictionary correction is also turned off: it's tuned for ordinary prose,
+  // and it actively hurts short bracketed sound-effect captions like
+  // "[groaning]" or stylised all-caps fonts, where Tesseract's own
+  // segmentation step can decide the block "isn't text" and reject it
+  // outright before any word-level guessing even happens - which is what
+  // produces a fully empty result rather than just a wrong one.
+  await Promise.all(
+    workers.map((w) =>
+      w.setParameters({
+        tessedit_pageseg_mode: PSM.SINGLE_BLOCK,
+        load_system_dawg: "0",
+        load_freq_dawg: "0",
+      })
+    )
+  );
+
+  // Fallback page-segmentation modes tried, in order, when the primary
+  // SINGLE_BLOCK pass comes back empty. Bracketed sound-effect captions
+  // ("[groaning]", "[door creaks]") and heavily stylised/boxed fonts are
+  // the main case this rescues: SINGLE_BLOCK's layout analysis sometimes
+  // decides a short, symbol-heavy line isn't a text block at all and
+  // discards it before recognition runs, where a mode that skips that
+  // block-detection step (SPARSE_TEXT) or assumes exactly one line
+  // (SINGLE_LINE) still finds the text.
+  const FALLBACK_PSMS = [PSM.SPARSE_TEXT, PSM.SINGLE_LINE];
 
   // Results are written into a pre-sized array by original frame index, not
   // pushed as they finish, so the output stays in chronological order even
@@ -143,10 +168,25 @@ export async function ocrFramesToCues(frames, { lang = "eng", onProgress, concur
       if (i >= total) break;
       const frame = frames[i];
       const ocrCanvas = preprocessFrameForOcr(frame.canvas);
-      const {
-        data: { text },
-      } = await worker.recognize(ocrCanvas);
-      const clean = text.replace(/\s+/g, " ").trim();
+      let clean = "";
+      {
+        const {
+          data: { text },
+        } = await worker.recognize(ocrCanvas);
+        clean = text.replace(/\s+/g, " ").trim();
+      }
+      // Primary pass found nothing - retry the same frame under different
+      // page-segmentation assumptions before giving up on it. Each attempt
+      // restores SINGLE_BLOCK afterwards so the next frame in this slot
+      // starts from the normal, fastest-path setting again.
+      for (let f = 0; f < FALLBACK_PSMS.length && !clean; f++) {
+        await worker.setParameters({ tessedit_pageseg_mode: FALLBACK_PSMS[f] });
+        const {
+          data: { text },
+        } = await worker.recognize(ocrCanvas);
+        clean = text.replace(/\s+/g, " ").trim();
+        await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_BLOCK });
+      }
       results[i] = clean ? { start: frame.startMs, end: frame.endMs, text: clean } : null;
       if (frameRows) {
         frameRows[i] = {

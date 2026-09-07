@@ -60,10 +60,18 @@ export async function parsePgs(arrayBuffer) {
   let pos = 0;
 
   let palette = null; // Map<id, [r,g,b,a]>
-  let objData = null; // { width, height, rleBytes } for the composition currently being assembled
-  let objAssembly = null; // { width, height, chunks: Uint8Array[] } - in-progress multi-segment object
+  // Decoded bitmap objects, keyed by their PGS object_id. A composition
+  // (PCS) references objects by id rather than embedding them directly, and
+  // an object's ODS is only resent when its pixels actually change - so this
+  // map is intentionally NOT cleared between compositions/epochs. Clearing
+  // it would drop any object a later composition reuses without redefining.
+  const objectsById = new Map(); // id -> { width, height, rleBytes }
+  let objAssembly = null; // { id, width, height, chunks: Uint8Array[] } - in-progress multi-segment object
   let pendingCompositionStart = null; // pts of the most recent PCS
-  let currentComposition = null; // the previous composition's { startMs, width, height, rleBytes, palette }, waiting to learn its endMs
+  // The list of { id, x, y } objects the most recent PCS said should be on
+  // screen, waiting to be resolved (via objectsById) once its END arrives.
+  let pendingObjectRefs = null;
+  let currentComposition = null; // the previous composition's { startMs, objects, palette }, waiting to learn its endMs
   const frames = [];
 
   while (pos + 13 <= len) {
@@ -94,13 +102,14 @@ export async function parsePgs(arrayBuffer) {
     } else if (segType === 0x15) {
       // ODS - object definition (bitmap). Large subtitle images (multi-line
       // dialogue, bigger fonts) don't fit in one ODS segment and get split
-      // across several: a "first" fragment carrying the width/height header,
-      // zero or more middle fragments, and a "last" fragment - all of which
-      // need to be reassembled into one RLE buffer before decoding. Treating
-      // every fragment as if it were a standalone object (the previous
-      // behaviour) silently corrupted or truncated any image that got split
-      // this way, which is exactly the kind of frame that came out blank or
-      // garbled after OCR.
+      // across several: a "first" fragment carrying the id/width/height
+      // header, zero or more middle fragments, and a "last" fragment - all
+      // of which need to be reassembled into one RLE buffer before
+      // decoding. Treating every fragment as if it were a standalone object
+      // (the previous behaviour) silently corrupted or truncated any image
+      // that got split this way, which is exactly the kind of frame that
+      // came out blank or garbled after OCR.
+      const objectId = view.getUint16(segStart);
       const flag = view.getUint8(segStart + 3);
       const isFirst = (flag & 0x40) !== 0;
       const isLast = (flag & 0x80) !== 0;
@@ -109,7 +118,7 @@ export async function parsePgs(arrayBuffer) {
         const width = view.getUint16(segStart + 7);
         const height = view.getUint16(segStart + 9);
         const chunk = new Uint8Array(arrayBuffer.slice(segStart + 11, segStart + segSize));
-        objAssembly = { width, height, chunks: [chunk] };
+        objAssembly = { id: objectId, width, height, chunks: [chunk] };
       } else if (objAssembly) {
         const chunk = new Uint8Array(arrayBuffer.slice(segStart + 4, segStart + segSize));
         objAssembly.chunks.push(chunk);
@@ -123,11 +132,25 @@ export async function parsePgs(arrayBuffer) {
           rleBytes.set(c, off);
           off += c.length;
         }
-        objData = { width: objAssembly.width, height: objAssembly.height, rleBytes };
+        objectsById.set(objAssembly.id, {
+          width: objAssembly.width,
+          height: objAssembly.height,
+          rleBytes,
+        });
         objAssembly = null;
       }
     } else if (segType === 0x16) {
-      // PCS - presentation composition: marks the start of a new screen.
+      // PCS - presentation composition: marks the start of a new screen and
+      // lists every bitmap object that should be shown for it (each with
+      // its own x/y position). A caption can legitimately be made of more
+      // than one object at once - e.g. "[groaning]" style bracket captions
+      // are sometimes encoded as one object per line, or a boxed line plus
+      // its fill - and previously only the single most-recently-decoded
+      // object was ever kept, so every object but the last silently
+      // vanished from frames that used more than one. Reading the full
+      // composition_object list here (instead of just the PTS) lets END
+      // recover all of them.
+      //
       // A subtitle's true on-screen duration runs from its own PCS until
       // the *next* PCS (whether that next one shows new text or is an empty
       // "clear" composition) - not until its own END segment, which shares
@@ -139,22 +162,47 @@ export async function parsePgs(arrayBuffer) {
         currentComposition = null;
       }
       pendingCompositionStart = pts;
-      objData = null;
+
+      const objectCount = view.getUint8(segStart + 10);
+      const refs = [];
+      let p = segStart + 11;
+      const segEnd = segStart + segSize;
+      for (let k = 0; k < objectCount && p + 8 <= segEnd; k++) {
+        const objectId = view.getUint16(p);
+        const cropFlag = view.getUint8(p + 3);
+        const x = view.getUint16(p + 4);
+        const y = view.getUint16(p + 6);
+        refs.push({ id: objectId, x, y });
+        // Optional cropping fields (horizontal/vertical position + width/
+        // height, 2 bytes each) only follow this entry when the crop flag
+        // is set - skip over them so the next object's id lines up.
+        p += 8 + (cropFlag === 0x40 ? 8 : 0);
+      }
+      pendingObjectRefs = refs;
     } else if (segType === 0x80) {
       // END - marks when the current display set's segments are complete.
-      // If this display set produced an object+palette (i.e. it's showing
-      // text, not clearing it), remember it as "on screen" so it can be
-      // closed out with the correct end time once we see what comes next.
-      if (pendingCompositionStart !== null && objData && palette) {
-        currentComposition = {
-          startMs: pendingCompositionStart,
-          width: objData.width,
-          height: objData.height,
-          rleBytes: objData.rleBytes,
-          palette,
-        };
+      // Resolve every object this composition referenced against what's
+      // been decoded so far, and if at least one resolves (i.e. it's
+      // showing text, not clearing it), remember the whole set as "on
+      // screen" so it can be closed out with the correct end time once we
+      // see what comes next.
+      if (pendingCompositionStart !== null && pendingObjectRefs && palette) {
+        const objects = pendingObjectRefs
+          .map((ref) => {
+            const obj = objectsById.get(ref.id);
+            return obj ? { ...obj, x: ref.x, y: ref.y } : null;
+          })
+          .filter(Boolean);
+        if (objects.length) {
+          currentComposition = {
+            startMs: pendingCompositionStart,
+            objects,
+            palette,
+          };
+        }
       }
       pendingCompositionStart = null;
+      pendingObjectRefs = null;
     }
 
     pos = segStart + segSize;
@@ -170,22 +218,54 @@ export async function parsePgs(arrayBuffer) {
   return frames.map((f) => renderFrameToCanvas(f));
 }
 
-function renderFrameToCanvas({ startMs, endMs, width, height, rleBytes, palette }) {
-  const indexed = decodeRle(rleBytes, width, height);
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, width);
-  canvas.height = Math.max(1, height);
-  const ctx = canvas.getContext("2d");
-  const imgData = ctx.createImageData(canvas.width, canvas.height);
-  for (let i = 0; i < indexed.length; i++) {
-    const [, , , a] = palette.get(indexed[i]) || [0, 0, 0, 0];
-    // render as plain black-on-white so the OCR engine has a clean, high-contrast image
-    const isOpaque = a / 255 > 0.4;
-    imgData.data[i * 4 + 0] = isOpaque ? 0 : 255;
-    imgData.data[i * 4 + 1] = isOpaque ? 0 : 255;
-    imgData.data[i * 4 + 2] = isOpaque ? 0 : 255;
-    imgData.data[i * 4 + 3] = 255;
+function renderFrameToCanvas({ startMs, endMs, objects, palette }) {
+  // A frame's composition can be made of several bitmap objects placed at
+  // different positions (see the PCS comment above) - size the canvas to
+  // the bounding box that covers all of them, then draw each one at its
+  // offset relative to that box, instead of assuming there's ever just one.
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const o of objects) {
+    minX = Math.min(minX, o.x);
+    minY = Math.min(minY, o.y);
+    maxX = Math.max(maxX, o.x + o.width);
+    maxY = Math.max(maxY, o.y + o.height);
   }
-  ctx.putImageData(imgData, 0, 0);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, maxX - minX);
+  canvas.height = Math.max(1, maxY - minY);
+  const ctx = canvas.getContext("2d");
+  // White background so any gap between objects (or the un-inked parts of
+  // each object) stays a clean, high-contrast page for OCR.
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  for (const o of objects) {
+    const indexed = decodeRle(o.rleBytes, o.width, o.height);
+    // Rendered on its own transparent tile first (rather than written
+    // straight into the shared canvas' pixel buffer) so drawImage below can
+    // properly alpha-composite it at its offset instead of overwriting
+    // whatever another object already drew in that region.
+    const tile = document.createElement("canvas");
+    tile.width = Math.max(1, o.width);
+    tile.height = Math.max(1, o.height);
+    const tileCtx = tile.getContext("2d");
+    const imgData = tileCtx.createImageData(tile.width, tile.height);
+    for (let i = 0; i < indexed.length; i++) {
+      const [, , , a] = palette.get(indexed[i]) || [0, 0, 0, 0];
+      // render as plain black-on-white so the OCR engine has a clean, high-contrast image
+      const isOpaque = a / 255 > 0.4;
+      imgData.data[i * 4 + 0] = 0;
+      imgData.data[i * 4 + 1] = 0;
+      imgData.data[i * 4 + 2] = 0;
+      imgData.data[i * 4 + 3] = isOpaque ? 255 : 0;
+    }
+    tileCtx.putImageData(imgData, 0, 0);
+    ctx.drawImage(tile, o.x - minX, o.y - minY);
+  }
+
   return { startMs, endMs, canvas };
 }
