@@ -1424,6 +1424,19 @@
   cursor: not-allowed;
 }
 
+.tool-modal__fileprogress {
+  flex: 0 0 auto;
+  min-width: 52px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--phosphor-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.tool-modal__fileprogress--done {
+  color: var(--phosphor);
+}
+
 .tool-modal__addmore {
   margin-top: 8px;
   width: 100%;

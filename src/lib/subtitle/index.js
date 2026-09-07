@@ -101,7 +101,7 @@ export const TOOLS = {
         const frames = await parsePgs(buf);
         const cues = await ocrFramesToCues(frames, {
           lang: options.lang || "eng",
-          onProgress: (p) => onProgress?.((i + p) / files.length),
+          onProgress: (p) => onProgress?.((i + p) / files.length, { index: i, fraction: p }),
         });
         results.push({ name: `${baseName(file.name)}.srt`, blob: new Blob([toSrtText(cues)], { type: "text/plain" }) });
       }
@@ -322,7 +322,7 @@ export const TOOLS = {
           : `${file.name} → couldn't confidently identify the language`;
 
         results.push({ name, blob: new Blob([body], { type: "text/plain" }), summary });
-        onProgress?.((i + 1) / files.length);
+        onProgress?.((i + 1) / files.length, { index: i, fraction: 1 });
       }
 
       if (results.length === 1) {

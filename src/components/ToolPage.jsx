@@ -7,6 +7,9 @@ export default function ToolPage({ toolId, onHome }) {
   const [options, setOptions] = useState(() => defaultOptions(tool));
   const [status, setStatus] = useState("idle"); // idle | running | done | error
   const [progress, setProgress] = useState(0);
+  // Per-file progress (0..1), only meaningful for multi-file tools while a
+  // batch is running — index-aligned with `files`.
+  const [fileProgress, setFileProgress] = useState([]);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
   const inputRef = useRef(null);
@@ -50,6 +53,7 @@ export default function ToolPage({ toolId, onHome }) {
     setStatus("idle");
     setResult(null);
     setError("");
+    setFileProgress([]);
   };
 
   const removeFile = (index) => {
@@ -57,6 +61,7 @@ export default function ToolPage({ toolId, onHome }) {
     setStatus("idle");
     setResult(null);
     setError("");
+    setFileProgress([]);
   };
 
   const moveFile = (index, dir) => {
@@ -72,9 +77,19 @@ export default function ToolPage({ toolId, onHome }) {
   const handleRun = async () => {
     setStatus("running");
     setProgress(0);
+    setFileProgress(isMulti ? files.map(() => 0) : []);
     setError("");
     try {
-      const out = await tool.run(files, options, (p) => setProgress(p));
+      const out = await tool.run(files, options, (p, info) => {
+        setProgress(p);
+        if (isMulti && info && typeof info.index === "number") {
+          setFileProgress((prev) => {
+            const next = prev.length === files.length ? [...prev] : files.map(() => 0);
+            next[info.index] = info.fraction;
+            return next;
+          });
+        }
+      });
       setResult(out);
       setStatus("done");
     } catch (err) {
@@ -101,6 +116,7 @@ export default function ToolPage({ toolId, onHome }) {
     setProgress(0);
     setError("");
     setResult(null);
+    setFileProgress([]);
   };
 
   return (
@@ -149,32 +165,51 @@ export default function ToolPage({ toolId, onHome }) {
                 {files.length} of {minFiles}–{maxFiles} files added
               </p>
               <ul>
-                {files.map((f, i) => (
-                  <li key={`${f.name}-${f.size}-${i}`}>
-                    <span className="tool-modal__fileorder">{i + 1}</span>
-                    <span className="tool-modal__filename" title={f.name}>
-                      {f.name}
-                    </span>
-                    <span className="tool-modal__filebtns">
-                      <button type="button" disabled={i === 0} onClick={() => moveFile(i, -1)} aria-label="Move up">
-                        ↑
-                      </button>
-                      <button
-                        type="button"
-                        disabled={i === files.length - 1}
-                        onClick={() => moveFile(i, 1)}
-                        aria-label="Move down"
-                      >
-                        ↓
-                      </button>
-                      <button type="button" onClick={() => removeFile(i)} aria-label="Remove file">
-                        ✕
-                      </button>
-                    </span>
-                  </li>
-                ))}
+                {files.map((f, i) => {
+                  const pct = Math.round((fileProgress[i] || 0) * 100);
+                  const fileDone = status === "running" && pct >= 100;
+                  return (
+                    <li key={`${f.name}-${f.size}-${i}`}>
+                      <span className="tool-modal__fileorder">{i + 1}</span>
+                      <span className="tool-modal__filename" title={f.name}>
+                        {f.name}
+                      </span>
+                      {status === "running" ? (
+                        <span
+                          className={`tool-modal__fileprogress${
+                            fileDone ? " tool-modal__fileprogress--done" : ""
+                          }`}
+                        >
+                          {fileDone ? "✓ done" : `${pct}%`}
+                        </span>
+                      ) : (
+                        <span className="tool-modal__filebtns">
+                          <button
+                            type="button"
+                            disabled={i === 0}
+                            onClick={() => moveFile(i, -1)}
+                            aria-label="Move up"
+                          >
+                            ↑
+                          </button>
+                          <button
+                            type="button"
+                            disabled={i === files.length - 1}
+                            onClick={() => moveFile(i, 1)}
+                            aria-label="Move down"
+                          >
+                            ↓
+                          </button>
+                          <button type="button" onClick={() => removeFile(i)} aria-label="Remove file">
+                            ✕
+                          </button>
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
-              {files.length < maxFiles && (
+              {files.length < maxFiles && status !== "running" && (
                 <button type="button" className="tool-modal__addmore" onClick={() => inputRef.current?.click()}>
                   + add more files
                 </button>
