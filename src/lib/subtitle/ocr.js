@@ -63,6 +63,65 @@ function preprocessFrameForOcr(sourceCanvas) {
   return out;
 }
 
+// Same crop-to-ink logic as above but scaled by a caller-supplied factor
+// instead of always chasing OCR_TARGET_TEXT_HEIGHT. Bold, tightly-kerned
+// fonts (blocky all-caps captions, "[groans]"-style bracket text) are the
+// case this exists for: the default preprocessing always upscales small
+// crops as much as OCR_MAX_UPSCALE allows, but smooth upscaling a font
+// that's already bold can blur adjacent strokes into each other and make
+// letters run together - which breaks Tesseract's character segmentation
+// rather than helping it, and no page-segmentation-mode retry can recover
+// from that since the pixels themselves have lost the gaps between
+// letters. A milder (or zero) scale keeps those gaps intact.
+function preprocessFrameForOcrAtScale(sourceCanvas, scale) {
+  const w = sourceCanvas.width;
+  const h = sourceCanvas.height;
+  if (w < 1 || h < 1) return sourceCanvas;
+  const srcCtx = sourceCanvas.getContext("2d");
+  const { data } = srcCtx.getImageData(0, 0, w, h);
+
+  let minX = w;
+  let minY = h;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < h; y++) {
+    const rowOffset = y * w;
+    for (let x = 0; x < w; x++) {
+      if (data[(rowOffset + x) * 4] < 128) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0) return sourceCanvas;
+
+  const cropW = maxX - minX + 1;
+  const cropH = maxY - minY + 1;
+  const scaledW = Math.max(1, Math.round(cropW * scale));
+  const scaledH = Math.max(1, Math.round(cropH * scale));
+  const outW = scaledW + OCR_PADDING * 2;
+  const outH = scaledH + OCR_PADDING * 2;
+
+  const out = document.createElement("canvas");
+  out.width = outW;
+  out.height = outH;
+  const outCtx = out.getContext("2d");
+  outCtx.fillStyle = "#fff";
+  outCtx.fillRect(0, 0, outW, outH);
+  if (scale !== 1) {
+    outCtx.imageSmoothingEnabled = true;
+    outCtx.imageSmoothingQuality = "high";
+  } else {
+    // No resampling at all when we deliberately want the original,
+    // unblurred pixel edges (the whole point of the low-scale fallback).
+    outCtx.imageSmoothingEnabled = false;
+  }
+  outCtx.drawImage(sourceCanvas, minX, minY, cropW, cropH, OCR_PADDING, OCR_PADDING, scaledW, scaledH);
+  return out;
+}
+
 // Runs OCR over a list of { startMs, endMs, canvas } frames and returns
 // cues in the shared { start, end, text } model. Frames that OCR to empty
 // text are dropped. Progress callback receives a 0..1 fraction.
@@ -144,15 +203,14 @@ export async function ocrFramesToCues(frames, { lang = "eng", onProgress, concur
     )
   );
 
-  // Fallback page-segmentation modes tried, in order, when the primary
-  // SINGLE_BLOCK pass comes back empty. Bracketed sound-effect captions
-  // ("[groaning]", "[door creaks]") and heavily stylised/boxed fonts are
-  // the main case this rescues: SINGLE_BLOCK's layout analysis sometimes
-  // decides a short, symbol-heavy line isn't a text block at all and
-  // discards it before recognition runs, where a mode that skips that
-  // block-detection step (SPARSE_TEXT) or assumes exactly one line
-  // (SINGLE_LINE) still finds the text.
-  const FALLBACK_PSMS = [PSM.SPARSE_TEXT, PSM.SINGLE_LINE];
+  // Page-segmentation modes tried, in order, for each image variant below.
+  // Bracketed sound-effect captions ("[groaning]", "[door creaks]") and
+  // heavily stylised/boxed fonts are the main case this rescues:
+  // SINGLE_BLOCK's layout analysis sometimes decides a short, symbol-heavy
+  // line isn't a text block at all and discards it before recognition runs,
+  // where a mode that skips that block-detection step (SPARSE_TEXT) or
+  // assumes exactly one line (SINGLE_LINE) still finds the text.
+  const PSM_ATTEMPTS = [PSM.SINGLE_BLOCK, PSM.SPARSE_TEXT, PSM.SINGLE_LINE];
 
   // Results are written into a pre-sized array by original frame index, not
   // pushed as they finish, so the output stays in chronological order even
@@ -163,30 +221,45 @@ export async function ocrFramesToCues(frames, { lang = "eng", onProgress, concur
 
   const runSlot = async (slot) => {
     const worker = workers[slot];
+    let currentPsm = PSM.SINGLE_BLOCK; // mirrors the worker's live setting, so we only call setParameters when it's actually changing
+    const setPsm = async (psm) => {
+      if (psm === currentPsm) return;
+      await worker.setParameters({ tessedit_pageseg_mode: psm });
+      currentPsm = psm;
+    };
+
     for (;;) {
       const i = nextIndex++;
       if (i >= total) break;
       const frame = frames[i];
-      const ocrCanvas = preprocessFrameForOcr(frame.canvas);
+
+      // Image variants tried in order, most-likely-to-work first: the
+      // normal upscaled-to-90px crop, then the same crop at a milder scale,
+      // then completely unscaled. Bold, tightly-kerned fonts can have their
+      // letters blurred into each other by upscaling, which breaks
+      // character segmentation in a way no page-segmentation-mode retry
+      // can fix - so when the fully-upscaled variant fails outright across
+      // every PSM above, backing off the scale (instead of just trying the
+      // same blurred pixels a different way) is what actually gives it a
+      // second, meaningfully different chance.
+      const variants = [
+        preprocessFrameForOcr(frame.canvas),
+        preprocessFrameForOcrAtScale(frame.canvas, 2),
+        preprocessFrameForOcrAtScale(frame.canvas, 1),
+      ];
+
       let clean = "";
-      {
-        const {
-          data: { text },
-        } = await worker.recognize(ocrCanvas);
-        clean = text.replace(/\s+/g, " ").trim();
+      for (let v = 0; v < variants.length && !clean; v++) {
+        for (let p = 0; p < PSM_ATTEMPTS.length && !clean; p++) {
+          await setPsm(PSM_ATTEMPTS[p]);
+          const {
+            data: { text },
+          } = await worker.recognize(variants[v]);
+          clean = text.replace(/\s+/g, " ").trim();
+        }
       }
-      // Primary pass found nothing - retry the same frame under different
-      // page-segmentation assumptions before giving up on it. Each attempt
-      // restores SINGLE_BLOCK afterwards so the next frame in this slot
-      // starts from the normal, fastest-path setting again.
-      for (let f = 0; f < FALLBACK_PSMS.length && !clean; f++) {
-        await worker.setParameters({ tessedit_pageseg_mode: FALLBACK_PSMS[f] });
-        const {
-          data: { text },
-        } = await worker.recognize(ocrCanvas);
-        clean = text.replace(/\s+/g, " ").trim();
-        await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_BLOCK });
-      }
+      await setPsm(PSM.SINGLE_BLOCK); // reset so the next frame in this slot starts from the normal, fastest-path setting
+
       results[i] = clean ? { start: frame.startMs, end: frame.endMs, text: clean } : null;
       if (frameRows) {
         frameRows[i] = {
