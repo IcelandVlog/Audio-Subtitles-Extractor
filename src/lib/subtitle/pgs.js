@@ -60,8 +60,10 @@ export async function parsePgs(arrayBuffer) {
   let pos = 0;
 
   let palette = null; // Map<id, [r,g,b,a]>
-  let objData = null; // { width, height, rleBytes }
-  let compositionStartMs = null;
+  let objData = null; // { width, height, rleBytes } for the composition currently being assembled
+  let objAssembly = null; // { width, height, chunks: Uint8Array[] } - in-progress multi-segment object
+  let pendingCompositionStart = null; // pts of the most recent PCS
+  let currentComposition = null; // the previous composition's { startMs, width, height, rleBytes, palette }, waiting to learn its endMs
   const frames = [];
 
   while (pos + 13 <= len) {
@@ -90,33 +92,79 @@ export async function parsePgs(arrayBuffer) {
         p += 5;
       }
     } else if (segType === 0x15) {
-      // ODS - object definition (bitmap)
-      const width = view.getUint16(segStart + 7);
-      const height = view.getUint16(segStart + 9);
-      const rleBytes = new Uint8Array(
-        arrayBuffer.slice(segStart + 11, segStart + segSize)
-      );
-      objData = { width, height, rleBytes };
+      // ODS - object definition (bitmap). Large subtitle images (multi-line
+      // dialogue, bigger fonts) don't fit in one ODS segment and get split
+      // across several: a "first" fragment carrying the width/height header,
+      // zero or more middle fragments, and a "last" fragment - all of which
+      // need to be reassembled into one RLE buffer before decoding. Treating
+      // every fragment as if it were a standalone object (the previous
+      // behaviour) silently corrupted or truncated any image that got split
+      // this way, which is exactly the kind of frame that came out blank or
+      // garbled after OCR.
+      const flag = view.getUint8(segStart + 3);
+      const isFirst = (flag & 0x40) !== 0;
+      const isLast = (flag & 0x80) !== 0;
+
+      if (isFirst) {
+        const width = view.getUint16(segStart + 7);
+        const height = view.getUint16(segStart + 9);
+        const chunk = new Uint8Array(arrayBuffer.slice(segStart + 11, segStart + segSize));
+        objAssembly = { width, height, chunks: [chunk] };
+      } else if (objAssembly) {
+        const chunk = new Uint8Array(arrayBuffer.slice(segStart + 4, segStart + segSize));
+        objAssembly.chunks.push(chunk);
+      }
+
+      if (isLast && objAssembly) {
+        const total = objAssembly.chunks.reduce((n, c) => n + c.length, 0);
+        const rleBytes = new Uint8Array(total);
+        let off = 0;
+        for (const c of objAssembly.chunks) {
+          rleBytes.set(c, off);
+          off += c.length;
+        }
+        objData = { width: objAssembly.width, height: objAssembly.height, rleBytes };
+        objAssembly = null;
+      }
     } else if (segType === 0x16) {
-      // PCS - presentation composition: marks the start of a new screen
-      compositionStartMs = pts;
+      // PCS - presentation composition: marks the start of a new screen.
+      // A subtitle's true on-screen duration runs from its own PCS until
+      // the *next* PCS (whether that next one shows new text or is an empty
+      // "clear" composition) - not until its own END segment, which shares
+      // the same timestamp as its own PCS and would otherwise always produce
+      // a zero-duration cue. So finalize whatever composition was previously
+      // pending using this PCS's timestamp as its end time.
+      if (currentComposition) {
+        frames.push({ ...currentComposition, endMs: pts });
+        currentComposition = null;
+      }
+      pendingCompositionStart = pts;
+      objData = null;
     } else if (segType === 0x80) {
-      // END - marks when the current composition clears
-      if (compositionStartMs !== null && objData && palette) {
-        frames.push({
-          startMs: compositionStartMs,
-          endMs: pts,
+      // END - marks when the current display set's segments are complete.
+      // If this display set produced an object+palette (i.e. it's showing
+      // text, not clearing it), remember it as "on screen" so it can be
+      // closed out with the correct end time once we see what comes next.
+      if (pendingCompositionStart !== null && objData && palette) {
+        currentComposition = {
+          startMs: pendingCompositionStart,
           width: objData.width,
           height: objData.height,
           rleBytes: objData.rleBytes,
           palette,
-        });
+        };
       }
-      compositionStartMs = null;
-      objData = null;
+      pendingCompositionStart = null;
     }
 
     pos = segStart + segSize;
+  }
+
+  // File ended while a subtitle was still "on screen" (no trailing empty
+  // composition to mark its clear time) - close it out with a sane fallback
+  // duration instead of dropping it entirely.
+  if (currentComposition) {
+    frames.push({ ...currentComposition, endMs: currentComposition.startMs + 4000 });
   }
 
   return frames.map((f) => renderFrameToCanvas(f));
