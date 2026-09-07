@@ -3,22 +3,34 @@ import { createWorker } from "tesseract.js";
 // Runs OCR over a list of { startMs, endMs, canvas } frames and returns
 // cues in the shared { start, end, text } model. Frames that OCR to empty
 // text are dropped. Progress callback receives a 0..1 fraction.
-export async function ocrFramesToCues(frames, { lang = "eng", onProgress } = {}) {
+//
+// Frames are spread across a small pool of Tesseract workers instead of one
+// worker doing every frame one at a time. Each tesseract.js worker runs in
+// its own Web Worker (real OS thread), so a pool of N workers actually uses
+// N CPU cores in parallel — this is the main lever for making a .sup with
+// hundreds of frames convert several times faster instead of chewing through
+// them serially.
+export async function ocrFramesToCues(frames, { lang = "eng", onProgress, concurrency } = {}) {
   if (!frames.length) return [];
 
-  // Tesseract's logger fires "recognizing text" many times per single frame,
-  // each with that ONE frame's own 0..1 completion — reporting that value
-  // straight through made the overall % reset back down near 0 at the start
-  // of every frame instead of climbing steadily, which is what showed up as
-  // jittery/flickering progress. Blend it with how many frames are already
-  // done so the number is always the true overall fraction and never goes
-  // backwards. Also skip pushing an update unless the rounded percent has
-  // actually changed, since re-rendering on every one of those dozens of
-  // per-frame ticks was adding real overhead and slowing the whole thing down.
-  let currentFrameIndex = 0;
+  const total = frames.length;
+  // Cap the pool: bounded by how many logical cores the machine reports, how
+  // many frames there actually are (no point starting more workers than
+  // frames), and a hard ceiling of 6 so we don't load 6+ copies of the
+  // language model into memory on a huge multi-core machine and make things
+  // worse instead of better.
+  const poolSize = Math.max(
+    1,
+    Math.min(concurrency || navigator.hardwareConcurrency || 4, 6, total)
+  );
+
+  let completedFrames = 0;
+  const inFlightFraction = new Array(poolSize).fill(0);
   let lastReportedPct = -1;
-  const reportProgress = (fraction) => {
+  const reportProgress = () => {
     if (!onProgress) return;
+    const sum = inFlightFraction.reduce((a, b) => a + b, 0);
+    const fraction = Math.min(1, (completedFrames + sum) / total);
     const pct = Math.round(fraction * 100);
     if (pct !== lastReportedPct) {
       lastReportedPct = pct;
@@ -26,30 +38,50 @@ export async function ocrFramesToCues(frames, { lang = "eng", onProgress } = {})
     }
   };
 
-  const worker = await createWorker(lang, 1, {
-    logger: (m) => {
-      if (m.status === "recognizing text") {
-        reportProgress((currentFrameIndex + m.progress) / frames.length);
-      }
-    },
-  });
+  // Start every worker in the pool up front, in parallel, so all of them
+  // finish loading the language model before frame processing begins rather
+  // than paying that setup cost serially between frames.
+  const workers = await Promise.all(
+    Array.from({ length: poolSize }, (_, slot) =>
+      createWorker(lang, 1, {
+        logger: (m) => {
+          if (m.status === "recognizing text") {
+            inFlightFraction[slot] = m.progress;
+            reportProgress();
+          }
+        },
+      })
+    )
+  );
 
-  const cues = [];
-  try {
-    for (let i = 0; i < frames.length; i++) {
-      currentFrameIndex = i;
+  // Results are written into a pre-sized array by original frame index, not
+  // pushed as they finish, so the output stays in chronological order even
+  // though frames complete out of order across the parallel workers.
+  const results = new Array(total);
+  let nextIndex = 0;
+
+  const runSlot = async (slot) => {
+    const worker = workers[slot];
+    for (;;) {
+      const i = nextIndex++;
+      if (i >= total) break;
       const frame = frames[i];
       const {
         data: { text },
       } = await worker.recognize(frame.canvas);
       const clean = text.replace(/\s+/g, " ").trim();
-      if (clean) {
-        cues.push({ start: frame.startMs, end: frame.endMs, text: clean });
-      }
-      reportProgress((i + 1) / frames.length);
+      results[i] = clean ? { start: frame.startMs, end: frame.endMs, text: clean } : null;
+      inFlightFraction[slot] = 0;
+      completedFrames += 1;
+      reportProgress();
     }
+  };
+
+  try {
+    await Promise.all(workers.map((_, slot) => runSlot(slot)));
   } finally {
-    await worker.terminate();
+    await Promise.all(workers.map((w) => w.terminate()));
   }
-  return cues;
+
+  return results.filter(Boolean);
 }

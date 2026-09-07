@@ -81,18 +81,39 @@ export const TOOLS = {
     accept: ".sup",
     fields: [OCR_LANG_FIELD],
     beta: true,
+    multiFile: true,
+    minFiles: 1,
+    maxFiles: 30,
     showPercent: true,
     progressLabel: "Running OCR",
     progressSuffix: "this can take a minute",
-    hint: "PGS/Blu-ray bitmap subtitles (.sup). Runs OCR in your browser — larger files take a while, and accuracy depends on image quality.",
-    async run([file], options, onProgress) {
-      const buf = await file.arrayBuffer();
-      const frames = await parsePgs(buf);
-      const cues = await ocrFramesToCues(frames, {
-        lang: options.lang || "eng",
-        onProgress,
-      });
-      return download(`${baseName(file.name)}.srt`, toSrtText(cues), "text/plain");
+    hint: "PGS/Blu-ray bitmap subtitles (.sup). Runs OCR in your browser — larger files take a while, and accuracy depends on image quality. Add more than one file to convert them all in one go — they come back as a single zip.",
+    async run(files, options, onProgress) {
+      // Files are still converted one at a time (not in parallel with each
+      // other) — each file's OCR pass already spreads its own frames across
+      // several workers (see ocrFramesToCues), so running whole files
+      // concurrently on top of that would just multiply how many worker
+      // pools sit in memory at once for no real speed gain.
+      const results = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const buf = await file.arrayBuffer();
+        const frames = await parsePgs(buf);
+        const cues = await ocrFramesToCues(frames, {
+          lang: options.lang || "eng",
+          onProgress: (p) => onProgress?.((i + p) / files.length),
+        });
+        results.push({ name: `${baseName(file.name)}.srt`, blob: new Blob([toSrtText(cues)], { type: "text/plain" }) });
+      }
+
+      if (results.length === 1) {
+        return download(results[0].name, results[0].blob, "text/plain");
+      }
+
+      const zip = new JSZip();
+      for (const r of results) zip.file(r.name, r.blob);
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      return download("sup-to-srt.zip", zipBlob, "application/zip");
     },
   },
 
