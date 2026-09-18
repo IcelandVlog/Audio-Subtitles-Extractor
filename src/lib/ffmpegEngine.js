@@ -168,7 +168,7 @@ function readFileWithProgress(file, onProgress) {
 // each file's bytes into memory as soon as it's added, on its own small
 // concurrency-limited queue that runs independently of (and in parallel
 // with) the strictly-serial ffmpeg processing queue above.
-const PREFETCH_CONCURRENCY = 3;
+const PREFETCH_CONCURRENCY = 1;
 let prefetchActive = 0;
 const prefetchWaiters = [];
 function acquirePrefetchSlot() {
