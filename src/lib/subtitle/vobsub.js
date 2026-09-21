@@ -137,50 +137,100 @@ function findPacksFromOffset(subBytes, startOffset) {
   return combined;
 }
 
+// Pixel codes stored in the RLE data are 0 = background, 1 = pattern (usually
+// the text), 2 = emphasis-1 and 3 = emphasis-2 (usually outline / anti-alias).
+// The SET_COLOR (03) and SET_CONTRAST (04) commands list their four nibbles in
+// the OPPOSITE order: [emphasis-2, emphasis-1, pattern, background]. So the
+// slot for pixel code `c` is `3 - c`. (Getting this backwards swaps background
+// and outline/text, which is what used to turn subtitles into black blobs.)
+const slotForCode = (code) => 3 - code;
+
+// Decide which pixel codes are the actual letters. DVD subtitles are normally
+// a bright fill with a dark outline (and sometimes a grey anti-alias ring), but
+// which of the four codes is the fill differs from disc to disc — so look at
+// the palette: among the codes that are actually visible, the bright ones are
+// the text and the dark ones are the outline. OCR needs the letters alone,
+// otherwise fill + outline merge into one solid blob and comes out as garbage
+// (or nothing at all).
+function pickInkCodes(colorIdx, alphaIdx, palette) {
+  const visible = [];
+  for (let code = 0; code < 4; code++) {
+    const slot = slotForCode(code);
+    if (alphaIdx[slot] <= 3) continue; // (near-)transparent, never drawn
+    const rgb = palette[colorIdx[slot]];
+    const lum = rgb ? 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2] : null;
+    visible.push({ code, lum });
+  }
+  if (visible.length === 0) return [];
+
+  const known = visible.filter((v) => v.lum !== null && !Number.isNaN(v.lum));
+  const lums = known.map((v) => v.lum);
+  const maxLum = lums.length ? Math.max(...lums) : 0;
+  const minLum = lums.length ? Math.min(...lums) : 0;
+
+  // No usable palette, or every visible colour looks the same: brightness
+  // can't tell fill from outline, so fall back to the DVD convention that the
+  // "pattern" pixels (code 1) are the text.
+  if (known.length < 2 || maxLum - minLum < 24) {
+    return [visible.some((v) => v.code === 1) ? 1 : visible[0].code];
+  }
+
+  const threshold = minLum + (maxLum - minLum) * 0.5;
+  return known.filter((v) => v.lum >= threshold).map((v) => v.code);
+}
+
 function parseSpu(spuBytes, width, height, globalPalette) {
   if (spuBytes.length < 4) return null;
   const view = new DataView(spuBytes.buffer, spuBytes.byteOffset, spuBytes.byteLength);
   const ctrlOffset = view.getUint16(2);
   if (ctrlOffset + 4 > spuBytes.length) return null;
 
-  let cmdPos = ctrlOffset;
-  let colorIdx = [0, 0, 0, 0];
-  let alphaIdx = [0, 0, 0, 0];
+  let colorIdx = null; // [emphasis-2, emphasis-1, pattern, background] palette indices — first SET_COLOR wins
+  const alphaIdx = [0, 0, 0, 0]; // same order; highest contrast seen per slot across all control blocks, so fade-in/out blocks don't hide the text
   let area = null;
   let evenOffset = null, oddOffset = null;
   const seen = new Set();
 
-  while (cmdPos < spuBytes.length && !seen.has(cmdPos)) {
+  let cmdPos = ctrlOffset;
+  while (cmdPos + 4 <= spuBytes.length && !seen.has(cmdPos)) {
     seen.add(cmdPos);
-    cmdPos += 4; // skip date(2) + next-offset(2); we walk sequentially instead
+    const blockStart = cmdPos;
+    const nextBlock = (spuBytes[cmdPos + 2] << 8) | spuBytes[cmdPos + 3]; // date(2) + next-offset(2)
+    cmdPos += 4;
     let cmd = spuBytes[cmdPos++];
     while (cmd !== 0xff && cmdPos < spuBytes.length) {
       if (cmd === 0x00 || cmd === 0x01 || cmd === 0x02) {
         // display control flags, no operand
       } else if (cmd === 0x03) {
         const b0 = spuBytes[cmdPos++], b1 = spuBytes[cmdPos++];
-        colorIdx = [b0 >> 4, b0 & 0xf, b1 >> 4, b1 & 0xf];
+        if (!colorIdx) colorIdx = [b0 >> 4, b0 & 0xf, b1 >> 4, b1 & 0xf];
       } else if (cmd === 0x04) {
         const b0 = spuBytes[cmdPos++], b1 = spuBytes[cmdPos++];
-        alphaIdx = [b0 >> 4, b0 & 0xf, b1 >> 4, b1 & 0xf];
+        const a = [b0 >> 4, b0 & 0xf, b1 >> 4, b1 & 0xf];
+        for (let k = 0; k < 4; k++) alphaIdx[k] = Math.max(alphaIdx[k], a[k]);
       } else if (cmd === 0x05) {
         const b = spuBytes.slice(cmdPos, cmdPos + 6);
         cmdPos += 6;
-        const x1 = (b[0] << 4) | (b[1] >> 4);
-        const x2 = ((b[1] & 0xf) << 8) | b[2];
-        const y1 = (b[3] << 4) | (b[4] >> 4);
-        const y2 = ((b[4] & 0xf) << 8) | b[5];
-        area = { x1, x2, y1, y2 };
+        if (!area) {
+          const x1 = (b[0] << 4) | (b[1] >> 4);
+          const x2 = ((b[1] & 0xf) << 8) | b[2];
+          const y1 = (b[3] << 4) | (b[4] >> 4);
+          const y2 = ((b[4] & 0xf) << 8) | b[5];
+          area = { x1, x2, y1, y2 };
+        }
       } else if (cmd === 0x06) {
-        evenOffset = (spuBytes[cmdPos] << 8) | spuBytes[cmdPos + 1];
-        oddOffset = (spuBytes[cmdPos + 2] << 8) | spuBytes[cmdPos + 3];
+        if (evenOffset === null) {
+          evenOffset = (spuBytes[cmdPos] << 8) | spuBytes[cmdPos + 1];
+          oddOffset = (spuBytes[cmdPos + 2] << 8) | spuBytes[cmdPos + 3];
+        }
         cmdPos += 4;
       } else {
         break; // unknown command, bail out of this block
       }
       cmd = spuBytes[cmdPos++];
     }
-    break; // one command block is enough for a static subtitle frame
+    if (nextBlock === blockStart) break; // last block points at itself
+    cmdPos = nextBlock;
   }
 
   if (!area || evenOffset === null) return null;
@@ -192,24 +242,23 @@ function parseSpu(spuBytes, width, height, globalPalette) {
   const even = decodeRleField(spuBytes.slice(evenOffset), w, rowsPerField);
   const odd = decodeRleField(spuBytes.slice(oddOffset), w, Math.floor(h / 2));
 
+  const isInk = [false, false, false, false];
+  for (const code of pickInkCodes(colorIdx || [0, 0, 0, 0], alphaIdx, globalPalette)) isInk[code] = true;
+
   const canvas = document.createElement("canvas");
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext("2d");
   const img = ctx.createImageData(w, h);
 
+  // Plain black letters on white — that's what the OCR step expects.
   for (let row = 0; row < h; row++) {
     const field = row % 2 === 0 ? even : odd;
     const fieldRow = Math.floor(row / 2);
     for (let col = 0; col < w; col++) {
-      const localColor = field[fieldRow * w + col] || 0;
-      const paletteEntry = colorIdx[localColor];
-      const alpha = alphaIdx[localColor];
-      const isOpaque = alpha > 3; // alpha is a 4-bit value, 0-15
-      const rgb = globalPalette[paletteEntry] || [255, 255, 255];
+      const code = field[fieldRow * w + col] || 0;
+      const shade = isInk[code] ? 0 : 255;
       const i = (row * w + col) * 4;
-      const shade = isOpaque ? 0 : 255;
-      void rgb;
       img.data[i] = shade;
       img.data[i + 1] = shade;
       img.data[i + 2] = shade;
