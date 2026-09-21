@@ -12,7 +12,7 @@ import {
   formatMatchesCodec,
   defaultFormatForCodec,
 } from "./ffmpegEngine";
-import { downloadBlob, stripExt } from "./download";
+import { downloadBlob, downloadResultFiles, addResultToZip, stripExt } from "./download";
 import { languageLabel } from "./languages";
 
 let idCounter = 0;
@@ -405,18 +405,19 @@ export function useTrackQueue() {
           });
           return { blob, extension: stream.format };
         } else {
-          const { blob, extension } = await extractSubtitle({
+          const { blob, extension, companions } = await extractSubtitle({
             inputName: track.inputName,
             streamIndex,
             codec: stream.codec,
+            language: stream.language,
             onProgress: (p) => patchStream(trackId, kind, streamIndex, { progress: p }),
           });
           patchStream(trackId, kind, streamIndex, {
             status: "done",
             progress: 1,
-            result: { extension, blob },
+            result: { extension, blob, companions },
           });
-          return { blob, extension };
+          return { blob, extension, companions };
         }
       } catch (err) {
         console.error(`[extractOneStream:${kind}] stream ${streamIndex} failed:`, err);
@@ -528,7 +529,7 @@ export function useTrackQueue() {
     if (!stream?.result?.blob) return;
     const base = stripExt(track.name);
     const langTag = stream.language && stream.language !== "und" ? `.${stream.language}` : "";
-    downloadBlob(stream.result.blob, `${base}${langTag}.${stream.result.extension}`);
+    downloadResultFiles(stream.result, `${base}${langTag}`);
   }, []);
 
   // ---- "extract all" for one kind on one video: zips every stream of that kind ----
@@ -620,21 +621,22 @@ export function useTrackQueue() {
                 result: { extension: stream.format, blob },
               });
             } else {
-              const { blob, extension } = await extractSubtitle({
+              const { blob, extension, companions } = await extractSubtitle({
                 inputName: track.inputName,
                 streamIndex: stream.index,
                 codec: stream.codec,
+                language: stream.language,
                 onProgress: (p) => {
                   perStreamProgress[i] = p;
                   reportOverall();
                   patchStream(trackId, kind, stream.index, { progress: p });
                 },
               });
-              zip.file(uniqueName(`${base}${langTag}.${extension}`), blob);
+              addResultToZip(zip, uniqueName(`${base}${langTag}.${extension}`), { blob, extension, companions });
               patchStream(trackId, kind, stream.index, {
                 status: "done",
                 progress: 1,
-                result: { extension, blob },
+                result: { extension, blob, companions },
               });
             }
           } catch (streamErr) {
@@ -718,7 +720,7 @@ export function useTrackQueue() {
         extractedEntries.forEach(({ track, stream }, i) => {
           const base = stripExt(track.name);
           const langTag = stream.language && stream.language !== "und" ? `.${stream.language}` : "";
-          zip.file(uniqueName(`${base}${langTag}.${stream.result.extension}`), stream.result.blob);
+          addResultToZip(zip, uniqueName(`${base}${langTag}.${stream.result.extension}`), stream.result);
           setProgress((i + 1) / extractedEntries.length);
         });
 
@@ -810,11 +812,12 @@ export function useTrackQueue() {
             continue;
           }
 
-          let blob, extension;
+          let blob, extension, companions;
           if (stream.status === "done" && stream.result?.blob) {
             // already extracted by hand earlier — reuse it instead of redoing the work
             blob = stream.result.blob;
             extension = stream.result.extension;
+            companions = stream.result.companions;
           } else {
             const res = await extractOneStream(trackId, kind, streamIndex);
             if (!res) {
@@ -823,11 +826,12 @@ export function useTrackQueue() {
             }
             blob = res.blob;
             extension = res.extension;
+            companions = res.companions;
           }
 
           const base = stripExt(track.name);
           const langTag = stream.language && stream.language !== "und" ? `.${stream.language}` : "";
-          zip.file(uniqueName(`${base}${langTag}.${extension}`), blob);
+          addResultToZip(zip, uniqueName(`${base}${langTag}.${extension}`), { blob, extension, companions });
           setProgress((i + 1) / entries.length);
         }
 

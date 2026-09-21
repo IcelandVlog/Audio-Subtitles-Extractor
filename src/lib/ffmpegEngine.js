@@ -1,5 +1,6 @@
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { toBlobURL } from "@ffmpeg/util";
+import { readCodecPrivateText, scanSubStream, buildIdx } from "./vobsubMux";
 
 // Served from our own /public folder instead of a third-party CDN — no CORS
 // dependency, no external outage/blocking risk, and everything really does
@@ -81,9 +82,25 @@ function bitmapSubtitleFormat(codec) {
   return BITMAP_SUBTITLE_FORMATS[codec] || DEFAULT_BITMAP_FORMAT;
 }
 
+// DVD/VobSub bitmap subtitles (what .sub + .idx pairs hold, and what MKV calls
+// S_VOBSUB). ffmpeg calls the codec "dvd_subtitle" (short name "dvdsub"). Unlike
+// PGS these are NOT dumped into a single container: they come out as the
+// classic .sub + .idx pair — see extractVobsubPair() below.
+const VOBSUB_CODECS = new Set(["dvd_subtitle", "dvdsub"]);
+
+export function isVobsubCodec(codec) {
+  return VOBSUB_CODECS.has(codec);
+}
+
 /** Extension we'll produce for a subtitle stream, without actually running ffmpeg. */
 export function guessSubtitleExtension(codec) {
+  if (isVobsubCodec(codec)) return "sub";
   return SUBTITLE_TEXT_CODECS.has(codec) ? "srt" : bitmapSubtitleFormat(codec).extension;
+}
+
+/** What to show in the UI for the file(s) a subtitle stream will produce, e.g. ".srt" or ".sub + .idx". */
+export function subtitleOutputLabel(codec) {
+  return isVobsubCodec(codec) ? ".sub + .idx" : `.${guessSubtitleExtension(codec)}`;
 }
 
 /** Parse ffprobe/ffmpeg -i stderr output into stream + duration info. */
@@ -536,7 +553,8 @@ export function extractSubtitleBatch({ inputName, streams, onProgress }) {
   return runExclusive(async () => {
     const ffmpeg = await loadEngine();
     const textStreams = streams.filter((s) => SUBTITLE_TEXT_CODECS.has(s.codec));
-    const bitmapStreams = streams.filter((s) => !SUBTITLE_TEXT_CODECS.has(s.codec));
+    const vobsubStreams = streams.filter((s) => isVobsubCodec(s.codec));
+    const bitmapStreams = streams.filter((s) => !SUBTITLE_TEXT_CODECS.has(s.codec) && !isVobsubCodec(s.codec));
     const results = {};
 
     const progressHandler = ({ progress }) => {
@@ -601,6 +619,19 @@ export function extractSubtitleBatch({ inputName, streams, onProgress }) {
     }
     for (const { extension, format, streams: group } of bitmapGroups.values()) {
       await runGroup(group, ["-c:s", "copy"], extension, undefined, format);
+    }
+
+    // VobSub needs its own .idx per stream, so each one gets its own pass.
+    for (const s of vobsubStreams) {
+      try {
+        results[s.streamIndex] = await extractVobsubPair(ffmpeg, {
+          inputName,
+          streamIndex: s.streamIndex,
+          language: s.language,
+        });
+      } catch (err) {
+        console.error(`[subs batch] vobsub stream ${s.streamIndex} failed:`, err);
+      }
     }
 
     return results;
@@ -712,8 +743,62 @@ export function compressAudio({ file, format = "mp3", quality = "medium", onProg
   });
 }
 
-/** Extract a subtitle stream. Tries to convert to .srt; falls back to its native container. */
-export function extractSubtitle({ inputName, streamIndex, codec, onProgress }) {
+/**
+ * Pull one DVD/VobSub stream out as a .sub + .idx pair.
+ *
+ * ffmpeg has no VobSub muxer, so one ffmpeg run writes the stream twice from a
+ * single read of the source: as an MPEG program stream (that IS the .sub) and
+ * as a tiny Matroska file whose CodecPrivate carries the original .idx header
+ * (frame size + palette). The .idx is then generated from those two. See
+ * vobsubMux.js for the details.
+ */
+async function extractVobsubPair(ffmpeg, { inputName, streamIndex, language }) {
+  const subName = `vobsub_${streamIndex}.sub`;
+  const hdrName = `vobsub_${streamIndex}_hdr.mks`;
+  try {
+    await execCapturingLog(ffmpeg, [
+      ...FAST_OPEN_ARGS,
+      "-i",
+      inputName,
+      "-map",
+      `0:${streamIndex}`,
+      "-c:s",
+      "copy",
+      "-f",
+      "vob",
+      subName,
+      "-map",
+      `0:${streamIndex}`,
+      "-c:s",
+      "copy",
+      "-f",
+      "matroska",
+      hdrName,
+    ]);
+    const subData = await ffmpeg.readFile(subName);
+    const hdrData = await ffmpeg.readFile(hdrName);
+    const entries = scanSubStream(subData);
+    if (entries.length === 0) {
+      throw new Error("No subtitle packets were found in this track.");
+    }
+    const idxText = buildIdx(readCodecPrivateText(hdrData), entries, language);
+    return {
+      blob: new Blob([subData.buffer]),
+      extension: "sub",
+      companions: [{ blob: new Blob([idxText], { type: "text/plain" }), extension: "idx" }],
+    };
+  } finally {
+    await ffmpeg.deleteFile(subName).catch(() => {});
+    await ffmpeg.deleteFile(hdrName).catch(() => {});
+  }
+}
+
+/**
+ * Extract a subtitle stream. Text codecs are converted to .srt; DVD/VobSub comes out
+ * as a .sub + .idx pair (the .idx is returned in `companions`); other bitmap codecs
+ * fall back to their native container.
+ */
+export function extractSubtitle({ inputName, streamIndex, codec, language, onProgress }) {
   return runExclusive(async () => {
     const ffmpeg = await loadEngine();
     const isText = SUBTITLE_TEXT_CODECS.has(codec);
@@ -724,6 +809,10 @@ export function extractSubtitle({ inputName, streamIndex, codec, onProgress }) {
     ffmpeg.on("progress", progressHandler);
 
     try {
+      if (isVobsubCodec(codec)) {
+        return await extractVobsubPair(ffmpeg, { inputName, streamIndex, language });
+      }
+
       if (isText) {
         const outputName = `subs_${streamIndex}.srt`;
         try {

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { guessSubtitleExtension } from "../lib/ffmpegEngine";
+import { subtitleOutputLabel } from "../lib/ffmpegEngine";
 
 const AUDIO_FORMATS = ["mp3", "wav", "ogg", "flac", "aac"];
 
@@ -131,7 +131,7 @@ export default function StreamTable({
                   </button>
                 )}
                 <span className="stream-row__ext">
-                  {isAudio ? null : `.${guessSubtitleExtension(s.codec)}`}
+                  {isAudio ? null : subtitleOutputLabel(s.codec)}
                 </span>
               </div>
 

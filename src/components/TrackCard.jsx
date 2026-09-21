@@ -76,7 +76,9 @@ export default function TrackCard({
     const stream = subtitleStreams.find((s) => s.index === streamIndex);
     if (!stream?.result?.blob) return;
     try {
-      const text = await stream.result.blob.text();
+      // a .sub is binary; for a .sub + .idx pair the readable half is the .idx
+      const idx = stream.result.companions?.find((c) => c.extension === "idx");
+      const text = await (idx ? idx.blob : stream.result.blob).text();
       setPreview(text);
     } catch {
       setPreview("Couldn't read this subtitle file.");

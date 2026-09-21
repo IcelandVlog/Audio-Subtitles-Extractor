@@ -11,6 +11,26 @@ export function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
+/**
+ * Download an extraction result, including any companion files. A DVD/VobSub
+ * track is a .sub + .idx pair, so this saves both under the same base name
+ * (players/converters match the two by name). Browsers ask once to allow
+ * "multiple downloads", hence the small stagger between files.
+ */
+export function downloadResultFiles(result, baseName) {
+  downloadBlob(result.blob, `${baseName}.${result.extension}`);
+  (result.companions || []).forEach((c, i) => {
+    setTimeout(() => downloadBlob(c.blob, `${baseName}.${c.extension}`), 350 * (i + 1));
+  });
+}
+
+/** Add a result (plus companions) to a zip, keeping companions' names in step with the main file's. */
+export function addResultToZip(zip, fullName, result) {
+  zip.file(fullName, result.blob);
+  const stem = fullName.replace(/\.[^./]+$/, "");
+  for (const c of result.companions || []) zip.file(`${stem}.${c.extension}`, c.blob);
+}
+
 export function stripExt(name) {
   return name.replace(/\.[^./]+$/, "");
 }
