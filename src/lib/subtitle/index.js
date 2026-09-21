@@ -137,7 +137,7 @@ export const TOOLS = {
     showPercent: true,
     progressLabel: "Running OCR",
     progressSuffix: "this can take a minute",
-    hint: "DVD VobSub subtitles — upload both the .idx and the .sub file together. Runs OCR in your browser.",
+    hint: "DVD VobSub subtitles — upload both the .idx and the .sub file together. Runs OCR in your browser. Use Inspect afterwards to see every subtitle image next to its OCR'd text and fix anything it got wrong.",
     async run(files, options, onProgress) {
       const idxFile = files.find((f) => f.name.toLowerCase().endsWith(".idx"));
       const subFile = files.find((f) => f.name.toLowerCase().endsWith(".sub"));
@@ -147,11 +147,17 @@ export const TOOLS = {
       const idxText = await idxFile.text();
       const subBuf = await subFile.arrayBuffer();
       const frames = await parseVobsub(idxText, subBuf);
-      const cues = await ocrFramesToCues(frames, {
+      // withFrames also returns every decoded frame (image + OCR text) so the
+      // Inspect view can show them next to the text and let the person fix it.
+      const { cues, frames: frameRows } = await ocrFramesToCues(frames, {
         lang: options.lang || "eng",
         onProgress,
+        withFrames: true,
       });
-      return download(`${baseName(idxFile.name)}.srt`, toSrtText(cues), "text/plain");
+      const srtName = `${baseName(idxFile.name)}.srt`;
+      const out = download(srtName, toSrtText(cues), "text/plain");
+      out.inspect = [{ fileName: `${baseName(idxFile.name)} (.idx + .sub)`, srtName, frames: frameRows }];
+      return out;
     },
   },
 
