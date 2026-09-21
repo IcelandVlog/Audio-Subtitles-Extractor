@@ -258,6 +258,22 @@ export async function ocrFramesToCues(frames, { lang = "eng", onProgress, concur
           clean = text.replace(/\s+/g, " ").trim();
         }
       }
+
+      // Last resort: the decoder picked the letters by brightness (fill vs
+      // outline). If that found nothing, retry with every visible colour as
+      // ink - the old rendering - in case brightness guessed wrong.
+      if (!clean && frame.altCanvas) {
+        const altVariants = [preprocessFrameForOcr(frame.altCanvas), preprocessFrameForOcrAtScale(frame.altCanvas, 2)];
+        for (let v = 0; v < altVariants.length && !clean; v++) {
+          for (let p = 0; p < PSM_ATTEMPTS.length && !clean; p++) {
+            await setPsm(PSM_ATTEMPTS[p]);
+            const {
+              data: { text },
+            } = await worker.recognize(altVariants[v]);
+            clean = text.replace(/\s+/g, " ").trim();
+          }
+        }
+      }
       await setPsm(PSM.SINGLE_BLOCK); // reset so the next frame in this slot starts from the normal, fastest-path setting
 
       results[i] = clean ? { start: frame.startMs, end: frame.endMs, text: clean } : null;

@@ -218,6 +218,43 @@ export async function parsePgs(arrayBuffer) {
   return frames.map((f) => renderFrameToCanvas(f));
 }
 
+// Which palette entries are the actual letters? Blu-ray subtitles are usually
+// a bright fill with a dark outline (and often a dark box or a soft shadow),
+// and every one of those is "opaque" - so treating all opaque pixels as ink
+// welds the letters and their outline into one solid blob, which OCR then
+// reads as garbage or as nothing. Instead, look at the colours the frame
+// actually uses: among the visible ones, the bright entries are the text and
+// the dark ones are outline/box. Returns { ink, all } as Sets of palette ids
+// (`all` = every visible entry, kept as a fallback rendering).
+function pickInkEntries(palette, indexedObjects) {
+  const counts = new Uint32Array(256);
+  for (const idx of indexedObjects) {
+    for (let i = 0; i < idx.length; i++) counts[idx[i]]++;
+  }
+
+  const visible = [];
+  for (let id = 0; id < 256; id++) {
+    if (!counts[id]) continue;
+    const entry = palette.get(id);
+    if (!entry || entry[3] / 255 <= 0.4) continue; // (mostly) transparent, never drawn
+    const [r, g, b] = entry;
+    visible.push({ id, lum: 0.299 * r + 0.587 * g + 0.114 * b });
+  }
+
+  const all = new Set(visible.map((v) => v.id));
+  if (visible.length < 2) return { ink: all, all };
+
+  const lums = visible.map((v) => v.lum);
+  const maxLum = Math.max(...lums);
+  const minLum = Math.min(...lums);
+  // Everything about the same brightness (e.g. plain text, no outline):
+  // nothing to separate, the whole thing is the text.
+  if (maxLum - minLum < 24) return { ink: all, all };
+
+  const threshold = minLum + (maxLum - minLum) * 0.5;
+  return { ink: new Set(visible.filter((v) => v.lum >= threshold).map((v) => v.id)), all };
+}
+
 function renderFrameToCanvas({ startMs, endMs, objects, palette }) {
   // A frame's composition can be made of several bitmap objects placed at
   // different positions (see the PCS comment above) - size the canvas to
@@ -234,38 +271,47 @@ function renderFrameToCanvas({ startMs, endMs, objects, palette }) {
     maxY = Math.max(maxY, o.y + o.height);
   }
 
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, maxX - minX);
-  canvas.height = Math.max(1, maxY - minY);
-  const ctx = canvas.getContext("2d");
-  // White background so any gap between objects (or the un-inked parts of
-  // each object) stays a clean, high-contrast page for OCR.
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const indexedObjects = objects.map((o) => decodeRle(o.rleBytes, o.width, o.height));
+  const { ink, all } = pickInkEntries(palette, indexedObjects);
 
-  for (const o of objects) {
-    const indexed = decodeRle(o.rleBytes, o.width, o.height);
-    // Rendered on its own transparent tile first (rather than written
-    // straight into the shared canvas' pixel buffer) so drawImage below can
-    // properly alpha-composite it at its offset instead of overwriting
-    // whatever another object already drew in that region.
-    const tile = document.createElement("canvas");
-    tile.width = Math.max(1, o.width);
-    tile.height = Math.max(1, o.height);
-    const tileCtx = tile.getContext("2d");
-    const imgData = tileCtx.createImageData(tile.width, tile.height);
-    for (let i = 0; i < indexed.length; i++) {
-      const [, , , a] = palette.get(indexed[i]) || [0, 0, 0, 0];
-      // render as plain black-on-white so the OCR engine has a clean, high-contrast image
-      const isOpaque = a / 255 > 0.4;
-      imgData.data[i * 4 + 0] = 0;
-      imgData.data[i * 4 + 1] = 0;
-      imgData.data[i * 4 + 2] = 0;
-      imgData.data[i * 4 + 3] = isOpaque ? 255 : 0;
-    }
-    tileCtx.putImageData(imgData, 0, 0);
-    ctx.drawImage(tile, o.x - minX, o.y - minY);
-  }
+  const draw = (inkSet) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, maxX - minX);
+    canvas.height = Math.max(1, maxY - minY);
+    const ctx = canvas.getContext("2d");
+    // White background so any gap between objects (or the un-inked parts of
+    // each object) stays a clean, high-contrast page for OCR.
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  return { startMs, endMs, canvas };
+    objects.forEach((o, n) => {
+      const indexed = indexedObjects[n];
+      // Rendered on its own transparent tile first (rather than written
+      // straight into the shared canvas' pixel buffer) so drawImage below can
+      // properly alpha-composite it at its offset instead of overwriting
+      // whatever another object already drew in that region.
+      const tile = document.createElement("canvas");
+      tile.width = Math.max(1, o.width);
+      tile.height = Math.max(1, o.height);
+      const tileCtx = tile.getContext("2d");
+      const imgData = tileCtx.createImageData(tile.width, tile.height);
+      for (let i = 0; i < indexed.length; i++) {
+        // render as plain black-on-white so the OCR engine has a clean, high-contrast image
+        imgData.data[i * 4 + 0] = 0;
+        imgData.data[i * 4 + 1] = 0;
+        imgData.data[i * 4 + 2] = 0;
+        imgData.data[i * 4 + 3] = inkSet.has(indexed[i]) ? 255 : 0;
+      }
+      tileCtx.putImageData(imgData, 0, 0);
+      ctx.drawImage(tile, o.x - minX, o.y - minY);
+    });
+    return canvas;
+  };
+
+  const frame = { startMs, endMs, canvas: draw(ink) };
+  // Second rendering with every visible colour as ink (the old behaviour).
+  // Only used by OCR as a last resort when the letters-only image yields
+  // nothing - e.g. dark text on a light outline, where "bright = text" is wrong.
+  if (ink.size !== all.size) frame.altCanvas = draw(all);
+  return frame;
 }

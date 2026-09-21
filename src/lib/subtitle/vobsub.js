@@ -161,7 +161,8 @@ function pickInkCodes(colorIdx, alphaIdx, palette) {
     const lum = rgb ? 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2] : null;
     visible.push({ code, lum });
   }
-  if (visible.length === 0) return [];
+  const all = visible.map((v) => v.code);
+  if (visible.length === 0) return { ink: [], all };
 
   const known = visible.filter((v) => v.lum !== null && !Number.isNaN(v.lum));
   const lums = known.map((v) => v.lum);
@@ -172,11 +173,11 @@ function pickInkCodes(colorIdx, alphaIdx, palette) {
   // can't tell fill from outline, so fall back to the DVD convention that the
   // "pattern" pixels (code 1) are the text.
   if (known.length < 2 || maxLum - minLum < 24) {
-    return [visible.some((v) => v.code === 1) ? 1 : visible[0].code];
+    return { ink: [visible.some((v) => v.code === 1) ? 1 : visible[0].code], all };
   }
 
   const threshold = minLum + (maxLum - minLum) * 0.5;
-  return known.filter((v) => v.lum >= threshold).map((v) => v.code);
+  return { ink: known.filter((v) => v.lum >= threshold).map((v) => v.code), all };
 }
 
 function parseSpu(spuBytes, width, height, globalPalette) {
@@ -242,31 +243,40 @@ function parseSpu(spuBytes, width, height, globalPalette) {
   const even = decodeRleField(spuBytes.slice(evenOffset), w, rowsPerField);
   const odd = decodeRleField(spuBytes.slice(oddOffset), w, Math.floor(h / 2));
 
-  const isInk = [false, false, false, false];
-  for (const code of pickInkCodes(colorIdx || [0, 0, 0, 0], alphaIdx, globalPalette)) isInk[code] = true;
-
-  const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext("2d");
-  const img = ctx.createImageData(w, h);
+  const { ink, all } = pickInkCodes(colorIdx || [0, 0, 0, 0], alphaIdx, globalPalette);
 
   // Plain black letters on white — that's what the OCR step expects.
-  for (let row = 0; row < h; row++) {
-    const field = row % 2 === 0 ? even : odd;
-    const fieldRow = Math.floor(row / 2);
-    for (let col = 0; col < w; col++) {
-      const code = field[fieldRow * w + col] || 0;
-      const shade = isInk[code] ? 0 : 255;
-      const i = (row * w + col) * 4;
-      img.data[i] = shade;
-      img.data[i + 1] = shade;
-      img.data[i + 2] = shade;
-      img.data[i + 3] = 255;
+  const draw = (codes) => {
+    const isInk = [false, false, false, false];
+    for (const code of codes) isInk[code] = true;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    const img = ctx.createImageData(w, h);
+    for (let row = 0; row < h; row++) {
+      const field = row % 2 === 0 ? even : odd;
+      const fieldRow = Math.floor(row / 2);
+      for (let col = 0; col < w; col++) {
+        const code = field[fieldRow * w + col] || 0;
+        const shade = isInk[code] ? 0 : 255;
+        const i = (row * w + col) * 4;
+        img.data[i] = shade;
+        img.data[i + 1] = shade;
+        img.data[i + 2] = shade;
+        img.data[i + 3] = 255;
+      }
     }
-  }
-  ctx.putImageData(img, 0, 0);
-  return canvas;
+    ctx.putImageData(img, 0, 0);
+    return canvas;
+  };
+
+  const result = { canvas: draw(ink) };
+  // Every visible colour as ink (the old behaviour) — OCR only falls back to
+  // this when the letters-only image reads as empty.
+  if (ink.length !== all.length) result.altCanvas = draw(all);
+  return result;
 }
 
 export async function parseVobsub(idxText, subArrayBuffer) {
@@ -279,9 +289,9 @@ export async function parseVobsub(idxText, subArrayBuffer) {
     const nextMs = timestamps[i + 1] ? timestamps[i + 1].ms : ms + 3000;
     try {
       const spu = findPacksFromOffset(subBytes, findApproxPackStart(subBytes, i, timestamps));
-      const canvas = parseSpu(spu, width, height, palette);
-      if (canvas) {
-        frames.push({ startMs: ms, endMs: nextMs, canvas });
+      const parsed = parseSpu(spu, width, height, palette);
+      if (parsed) {
+        frames.push({ startMs: ms, endMs: nextMs, ...parsed });
       }
     } catch {
       // skip unparsable entries rather than failing the whole file
