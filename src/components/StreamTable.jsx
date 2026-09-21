@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { subtitleOutputLabel } from "../lib/ffmpegEngine";
+import { subtitleOutputLabel, isTextSubtitleCodec } from "../lib/ffmpegEngine";
 
 const AUDIO_FORMATS = ["mp3", "wav", "ogg", "flac", "aac"];
 
@@ -155,7 +155,7 @@ export default function StreamTable({
                   <span className="stream-row__pct">{Math.round(s.progress * 100)}%</span>
                 ) : s.status === "done" ? (
                   <>
-                    {!isAudio && (
+                    {!isAudio && isTextSubtitleCodec(s.codec) && (
                       <button className="stream-row__link" onClick={() => onShowOne(s.index)}>
                         Show
                       </button>

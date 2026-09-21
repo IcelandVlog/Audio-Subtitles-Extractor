@@ -88,6 +88,11 @@ function bitmapSubtitleFormat(codec) {
 // classic .sub + .idx pair — see extractVobsubPair() below.
 const VOBSUB_CODECS = new Set(["dvd_subtitle", "dvdsub"]);
 
+/** True for text-based subtitle codecs (extracted as readable .srt). Bitmap ones (VobSub, PGS, ...) can't be previewed as text. */
+export function isTextSubtitleCodec(codec) {
+  return SUBTITLE_TEXT_CODECS.has(codec);
+}
+
 export function isVobsubCodec(codec) {
   return VOBSUB_CODECS.has(codec);
 }
