@@ -394,7 +394,7 @@ async function readFileWithRetry(file) {
   }
 }
 
-async function openRar(file) {
+async function openRarInMemory(file) {
   const [data, wasmBinary] = await Promise.all([readFileWithRetry(file), loadUnrarWasm()]);
   const extractor = await createExtractorFromData({ data, wasmBinary });
 
@@ -449,6 +449,103 @@ async function openRar(file) {
       return { failed };
     },
   };
+}
+
+// Preferred RAR path: a Web Worker reads the archive straight off disk in
+// small blocks (FileReaderSync) and hands back extracted files as Blobs, so
+// the archive is never loaded into memory as one giant buffer. This is what
+// fixes "Array buffer allocation failed" on multi-GB .rar files.
+async function openRarStreaming(file) {
+  const worker = new Worker(new URL("./rarWorker.js", import.meta.url), { type: "module" });
+  const pending = new Map();
+  let nextId = 1;
+
+  const failAll = (message) => {
+    for (const p of pending.values()) p.reject(new Error(message));
+    pending.clear();
+  };
+  worker.onmessage = ({ data }) => {
+    const p = pending.get(data.id);
+    if (!p) return;
+    if (data.type === "progress") p.onProgress?.(data.frac);
+    else if (data.type === "file") p.onFile?.(data);
+    else if (data.type === "error") {
+      pending.delete(data.id);
+      p.reject(new Error(data.message));
+    } else {
+      pending.delete(data.id);
+      p.resolve(data);
+    }
+  };
+  worker.onerror = (e) => failAll(e?.message || "The RAR reader crashed.");
+
+  const call = (msg, hooks = {}) =>
+    new Promise((resolve, reject) => {
+      const id = nextId++;
+      pending.set(id, { resolve, reject, ...hooks });
+      worker.postMessage({ ...msg, id });
+    });
+
+  let opened;
+  try {
+    opened = await call({ type: "open", file });
+  } catch (err) {
+    worker.terminate();
+    throw err;
+  }
+  const entries = opened.entries;
+
+  return {
+    kind: "rar",
+    sizeLimited: false,
+    entries,
+    async extractOne(name, onProgress) {
+      const res = await call({ type: "extractOne", name }, { onProgress });
+      return res.blob;
+    },
+    async extractAll(onProgress) {
+      const files = [];
+      await call(
+        { type: "extractAll" },
+        {
+          onFile: (f) => {
+            files.push({ name: f.name, blob: f.blob });
+            onProgress?.(f.frac);
+          },
+        }
+      );
+      return { files, failed: [] };
+    },
+    async extractAllToDirectory(dirHandle, onProgress) {
+      const failed = [];
+      let writes = Promise.resolve();
+      await call(
+        { type: "extractAll" },
+        {
+          onFile: (f) => {
+            // write to disk in order while the worker keeps decompressing
+            writes = writes.then(async () => {
+              try {
+                await writeBlobToDirectory(dirHandle, f.name, f.blob);
+              } catch (err) {
+                failed.push({ name: f.name, error: err?.message || "Extraction failed." });
+              }
+            });
+            onProgress?.(f.frac);
+          },
+        }
+      );
+      await writes;
+      return { failed };
+    },
+  };
+}
+
+async function openRar(file) {
+  if (typeof Worker !== "undefined" && typeof Blob !== "undefined") {
+    return openRarStreaming(file);
+  }
+  return openRarInMemory(file);
 }
 
 async function writeBlobToDirectory(dirHandle, relPath, blob) {

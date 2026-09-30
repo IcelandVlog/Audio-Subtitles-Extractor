@@ -170,9 +170,9 @@ export default function ArchiveExtractor({ onHome }) {
         <p className="tool-page__hint">
           Drop in a .zip or .rar file. Strip reads just the file list first — instantly, even on huge
           archives — then only pulls the bytes of whichever files you actually extract, streamed
-          straight off disk. No size limit for .zip on this browser.
+          straight off disk. No size limit for .zip or .rar on this browser.
           {archive?.kind === "rar" &&
-            " .rar files need to be loaded into memory once to open (a limitation of the RAR format itself), so very large .rar archives are bound by your device's available memory."}
+            " .rar files are read in small pieces straight from disk too, but the format has to be decompressed from the start, so pulling a file from deep inside a big solid .rar can take a while."}
           {" "}Everything happens on your device; nothing is uploaded anywhere.
         </p>
 
