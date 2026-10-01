@@ -102,7 +102,7 @@ export default function ArchiveExtractor({ onHome }) {
     setBulkProgress(0);
     setBulkError("");
     setBulkSavedToFolder(false);
-    setRows((prev) => prev.map((r) => ({ ...r, status: "extracting", error: null })));
+    setRows((prev) => prev.map((r) => ({ ...r, status: "extracting", error: null, progress: undefined })));
     try {
       const { failed } = await archiveRef.current.extractAllToDirectory(dirHandle, setBulkProgress);
       markResults(failed);
@@ -125,7 +125,7 @@ export default function ArchiveExtractor({ onHome }) {
     setBulkBlob(null);
     setBulkError("");
     setBulkSavedToFolder(false);
-    setRows((prev) => prev.map((r) => ({ ...r, status: "extracting", error: null })));
+    setRows((prev) => prev.map((r) => ({ ...r, status: "extracting", error: null, progress: undefined })));
     try {
       const { files, failed } = await archiveRef.current.extractAll(setBulkProgress);
       markResults(failed);
@@ -172,7 +172,7 @@ export default function ArchiveExtractor({ onHome }) {
           archives — then only pulls the bytes of whichever files you actually extract, streamed
           straight off disk. No size limit for .zip or .rar on this browser.
           {archive?.kind === "rar" &&
-            " .rar files are read in small pieces straight from disk too, but the format has to be decompressed from the start, so pulling a file from deep inside a big solid .rar can take a while."}
+            " .rar files are read in small pieces straight from disk too, and big non-solid .rar files extract several files at once. A solid .rar has to be decoded in order, so a file deep inside one takes longer — the percentage shows how far along it is."}
           {" "}Everything happens on your device; nothing is uploaded anywhere.
         </p>
 
@@ -274,7 +274,7 @@ export default function ArchiveExtractor({ onHome }) {
                         <div className="stream-row__action">
                           {r.status === "extracting" ? (
                             <span className="stream-row__pct">
-                              {archive?.kind === "zip" ? `${Math.round((r.progress || 0) * 100)}%` : "…"}
+                              {typeof r.progress === "number" ? `${Math.round(r.progress * 100)}%` : "…"}
                             </span>
                           ) : r.status === "done" ? (
                             bulkSavedToFolder ? (

@@ -451,15 +451,21 @@ async function openRarInMemory(file) {
   };
 }
 
-// Preferred RAR path: a Web Worker reads the archive straight off disk in
-// small blocks (FileReaderSync) and hands back extracted files as Blobs, so
-// the archive is never loaded into memory as one giant buffer. This is what
-// fixes "Array buffer allocation failed" on multi-GB .rar files.
-async function openRarStreaming(file) {
+// Preferred RAR path: Web Workers read the archive straight off disk in small
+// blocks (FileReaderSync) and hand back extracted files as Blobs, so the
+// archive is never loaded into memory as one giant buffer. This is what fixes
+// "Array buffer allocation failed" on multi-GB .rar files.
+//
+// For non-solid archives, "extract all" also runs a few workers in parallel
+// (each one opens the same File and takes the next unextracted entry), which
+// is where most of the speed-up comes from. Solid archives must be decoded in
+// order, so they stay on a single worker and a single pass.
+const MAX_RAR_WORKERS = Math.max(1, Math.min(3, (navigator.hardwareConcurrency || 4) - 1));
+
+function makeRarChannel() {
   const worker = new Worker(new URL("./rarWorker.js", import.meta.url), { type: "module" });
   const pending = new Map();
   let nextId = 1;
-
   const failAll = (message) => {
     for (const p of pending.values()) p.reject(new Error(message));
     pending.clear();
@@ -478,64 +484,114 @@ async function openRarStreaming(file) {
     }
   };
   worker.onerror = (e) => failAll(e?.message || "The RAR reader crashed.");
-
   const call = (msg, hooks = {}) =>
     new Promise((resolve, reject) => {
       const id = nextId++;
       pending.set(id, { resolve, reject, ...hooks });
       worker.postMessage({ ...msg, id });
     });
+  return { call, terminate: () => worker.terminate() };
+}
 
+async function openRarStreaming(file) {
+  const primary = makeRarChannel();
   let opened;
   try {
-    opened = await call({ type: "open", file });
+    opened = await primary.call({ type: "open", file });
   } catch (err) {
-    worker.terminate();
+    primary.terminate();
     throw err;
   }
-  const entries = opened.entries;
+  const { entries, solid } = opened;
+  const totalBytes = entries.reduce((n, e) => n + (e.size || 0), 0) || 1;
+
+  // Runs every entry through `handle(entry, blob)`; returns the ones that failed.
+  async function runBulk(handle, onProgress) {
+    const failed = [];
+
+    if (solid || entries.length < 2 || MAX_RAR_WORKERS < 2) {
+      // single pass, in archive order
+      let writes = Promise.resolve();
+      await primary.call(
+        { type: "extractAll" },
+        {
+          onProgress,
+          onFile: (f) => {
+            writes = writes.then(() =>
+              Promise.resolve(handle({ name: f.name }, f.blob)).catch((err) =>
+                failed.push({ name: f.name, error: err?.message || "Extraction failed." })
+              )
+            );
+          },
+        }
+      );
+      await writes;
+      onProgress?.(1);
+      return failed;
+    }
+
+    // parallel path (non-solid)
+    const extras = Array.from({ length: Math.min(MAX_RAR_WORKERS, entries.length) - 1 }, makeRarChannel);
+    try {
+      await Promise.all(extras.map((c) => c.call({ type: "open", file })));
+    } catch {
+      /* an extra worker failing to open just means fewer workers */
+    }
+    const channels = [primary, ...extras];
+    const frac = new Array(entries.length).fill(0);
+    const report = () => {
+      let done = 0;
+      for (let i = 0; i < entries.length; i++) done += frac[i] * (entries[i].size || 0);
+      onProgress?.(Math.min(1, done / totalBytes));
+    };
+    let next = 0;
+    let writes = Promise.resolve();
+    await Promise.all(
+      channels.map(async (ch) => {
+        while (next < entries.length) {
+          const i = next++;
+          const entry = entries[i];
+          try {
+            const blob = await ch.call(
+              { type: "extractOne", name: entry.name },
+              { onProgress: (f) => { frac[i] = f; report(); } }
+            );
+            frac[i] = 1;
+            report();
+            writes = writes.then(() =>
+              Promise.resolve(handle(entry, blob)).catch((err) =>
+                failed.push({ name: entry.name, error: err?.message || "Extraction failed." })
+              )
+            );
+          } catch (err) {
+            frac[i] = 1;
+            failed.push({ name: entry.name, error: err?.message || "Extraction failed." });
+          }
+        }
+      })
+    );
+    await writes;
+    extras.forEach((c) => c.terminate());
+    onProgress?.(1);
+    return failed;
+  }
 
   return {
     kind: "rar",
     sizeLimited: false,
     entries,
     async extractOne(name, onProgress) {
-      const res = await call({ type: "extractOne", name }, { onProgress });
+      const res = await primary.call({ type: "extractOne", name }, { onProgress });
+      onProgress?.(1);
       return res.blob;
     },
     async extractAll(onProgress) {
       const files = [];
-      await call(
-        { type: "extractAll" },
-        {
-          onFile: (f) => {
-            files.push({ name: f.name, blob: f.blob });
-            onProgress?.(f.frac);
-          },
-        }
-      );
-      return { files, failed: [] };
+      const failed = await runBulk((entry, blob) => files.push({ name: entry.name, blob }), onProgress);
+      return { files, failed };
     },
     async extractAllToDirectory(dirHandle, onProgress) {
-      const failed = [];
-      let writes = Promise.resolve();
-      await call(
-        { type: "extractAll" },
-        {
-          onFile: (f) => {
-            // write to disk in order while the worker keeps decompressing
-            writes = writes.then(async () => {
-              try {
-                await writeBlobToDirectory(dirHandle, f.name, f.blob);
-              } catch (err) {
-                failed.push({ name: f.name, error: err?.message || "Extraction failed." });
-              }
-            });
-            onProgress?.(f.frac);
-          },
-        }
-      );
-      await writes;
+      const failed = await runBulk((entry, blob) => writeBlobToDirectory(dirHandle, entry.name, blob), onProgress);
       return { failed };
     },
   };
