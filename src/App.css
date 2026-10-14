@@ -794,11 +794,18 @@
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text);
-  background: transparent;
+  background: var(--surface-raised);
+  color-scheme: inherit;
   border: 1px solid var(--border-soft);
   border-radius: 6px;
   padding: 4px 8px;
   cursor: pointer;
+}
+/* The open dropdown list is drawn by the browser; give its options explicit
+   theme colours so text stays readable in both dark and light mode. */
+.lang-picker__pick select option {
+  background: var(--surface-raised);
+  color: var(--text);
 }
 .lang-picker__pick select:disabled {
   opacity: 0.4;
