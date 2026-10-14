@@ -1,4 +1,5 @@
 import { francAll } from "franc";
+import { detectVariant } from "./regionDetect";
 
 // franc identifies text by trigram/script analysis — no model download, works
 // instantly, and covers 150+ languages (vs. Whisper's 99), which is exactly
@@ -115,10 +116,15 @@ export function detectSubtitleLanguage(text) {
   if (!iso3 || iso3 === "und") return null;
 
   const [short, name] = ISO_639_3[iso3] || [null, null];
-  return {
+  const base = {
     iso3,
     code: short || iso3,
     label: name || iso3,
     confidence, // already normalized 0–1 by franc
   };
+
+  // Refine pt / es / zh into regional or script variants (pt-br, es-la, zh-hans...).
+  // Returns null when the evidence isn't clear, in which case the plain tag stays.
+  const variant = detectVariant(base.code, text);
+  return variant ? { ...base, code: variant.code, label: variant.label } : base;
 }
