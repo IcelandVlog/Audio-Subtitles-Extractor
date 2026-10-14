@@ -10,6 +10,10 @@ import { useState } from "react";
 export default function LanguageTargetPicker({ kind, options, files, onCancel, onConfirm }) {
   const [selectedLangs, setSelectedLangs] = useState(() => new Set(options.map((o) => o.code)));
   const [selectedFiles, setSelectedFiles] = useState(() => new Set(files.map((f) => f.id)));
+  // Per-language track pick: "all" or a 1-based position among a file's tracks of
+  // that language. Only shown for languages where some file has more than one.
+  const [picks, setPicks] = useState({});
+  const setPick = (code, value) => setPicks((prev) => ({ ...prev, [code]: value }));
 
   const toggleLang = (code) => {
     setSelectedLangs((prev) => {
@@ -130,6 +134,24 @@ export default function LanguageTargetPicker({ kind, options, files, onCancel, o
                     {opt.fileCount === 1 ? "" : "s"}
                   </span>
                 </label>
+                {opt.maxPerFile > 1 && (
+                  <div className="lang-picker__pick">
+                    <span>{opt.maxPerFile} per file — extract:</span>
+                    <select
+                      value={picks[opt.code] || "all"}
+                      disabled={!selectedLangs.has(opt.code)}
+                      onChange={(e) => setPick(opt.code, e.target.value)}
+                      aria-label={`Which ${opt.label} track to extract`}
+                    >
+                      <option value="all">All tracks</option>
+                      {Array.from({ length: opt.maxPerFile }, (_, i) => (
+                        <option key={i + 1} value={String(i + 1)}>
+                          Track {i + 1} only
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
@@ -143,7 +165,7 @@ export default function LanguageTargetPicker({ kind, options, files, onCancel, o
             type="button"
             className="lang-picker__run"
             disabled={!canRun}
-            onClick={() => onConfirm(Array.from(selectedLangs), Array.from(selectedFiles))}
+            onClick={() => onConfirm(Array.from(selectedLangs), Array.from(selectedFiles), picks)}
           >
             {canRun
               ? `Extract (${selectedLangs.size} lang${selectedLangs.size === 1 ? "" : "s"} · ${

@@ -27,10 +27,11 @@ function buildLanguageOptions(tracks, kind) {
   const byCode = new Map();
   for (const track of tracks) {
     const seenInThisFile = new Set();
+    const perFile = new Map();
     for (const stream of track[listKey]) {
       const code = stream.language || "und";
       if (!byCode.has(code)) {
-        byCode.set(code, { code, label: languageLabel(code), streamCount: 0, fileCount: 0 });
+        byCode.set(code, { code, label: languageLabel(code), streamCount: 0, fileCount: 0, maxPerFile: 0 });
       }
       const entry = byCode.get(code);
       entry.streamCount += 1;
@@ -38,6 +39,8 @@ function buildLanguageOptions(tracks, kind) {
         entry.fileCount += 1;
         seenInThisFile.add(code);
       }
+      perFile.set(code, (perFile.get(code) || 0) + 1);
+      entry.maxPerFile = Math.max(entry.maxPerFile, perFile.get(code));
     }
   }
   return Array.from(byCode.values()).sort(
@@ -753,7 +756,7 @@ export function useTrackQueue() {
   // languages…" picker on the queue toolbar — one click extracts + bundles
   // only the languages the user actually wants, across the whole queue.
   const extractByLanguageForQueue = useCallback(
-    async (kind, selectedCodes, selectedFileIds) => {
+    async (kind, selectedCodes, selectedFileIds, trackPicks) => {
       const codes = new Set(selectedCodes);
       // no fileIds passed (or falsy) means "every file" — keeps the function
       // usable without the file filter for callers that don't need it
@@ -763,10 +766,22 @@ export function useTrackQueue() {
       for (const track of tracksAtStart) {
         if (fileIds && !fileIds.has(track.id)) continue;
         const list = kind === "audio" ? track.audioStreams : track.subtitleStreams;
+        // trackPicks[code] = "all" (default) or a 1-based position among this
+        // file's tracks of that language, e.g. 2 = "the second English track".
+        // If a file has fewer tracks than the pick, it falls back to its last one
+        // so no file is silently left out.
+        const byLang = new Map();
         for (const stream of list) {
-          if (codes.has(stream.language || "und")) {
-            entries.push({ trackId: track.id, streamIndex: stream.index });
-          }
+          const code = stream.language || "und";
+          if (!codes.has(code)) continue;
+          if (!byLang.has(code)) byLang.set(code, []);
+          byLang.get(code).push(stream);
+        }
+        for (const [code, streams] of byLang) {
+          const pick = trackPicks?.[code];
+          const chosen =
+            pick && pick !== "all" ? [streams[Math.min(Number(pick), streams.length) - 1]] : streams;
+          for (const stream of chosen) entries.push({ trackId: track.id, streamIndex: stream.index });
         }
       }
       if (entries.length === 0) return;
@@ -849,11 +864,11 @@ export function useTrackQueue() {
   );
 
   const extractAudioByLanguageQueue = useCallback(
-    (codes, fileIds) => extractByLanguageForQueue("audio", codes, fileIds),
+    (codes, fileIds, picks) => extractByLanguageForQueue("audio", codes, fileIds, picks),
     [extractByLanguageForQueue]
   );
   const extractSubtitlesByLanguageQueue = useCallback(
-    (codes, fileIds) => extractByLanguageForQueue("subtitle", codes, fileIds),
+    (codes, fileIds, picks) => extractByLanguageForQueue("subtitle", codes, fileIds, picks),
     [extractByLanguageForQueue]
   );
 

@@ -51,9 +51,13 @@ export default function App() {
     queueAudioAllStatus,
     queueAudioAllProgress,
     downloadAllAudioQueue,
+    extractAllAudioQueue,
+    queueAudioExtractedCount,
     queueSubsAllStatus,
     queueSubsAllProgress,
     downloadAllSubtitlesQueue,
+    extractAllSubtitlesQueue,
+    queueSubsExtractedCount,
     audioLanguageOptions,
     subtitleLanguageOptions,
     extractAudioByLanguageQueue,
@@ -179,6 +183,8 @@ export default function App() {
                     disabled={anyBusy || audioLanguageOptions.length === 0}
                     onPickLanguages={() => setLangPickerKind("audio")}
                     onDownload={downloadAllAudioQueue}
+                    extractedCount={queueAudioExtractedCount}
+                    onBundleExtracted={extractAllAudioQueue}
                   />
                   <QueueBulkAction
                     label="All subtitles"
@@ -188,6 +194,8 @@ export default function App() {
                     disabled={anyBusy || subtitleLanguageOptions.length === 0}
                     onPickLanguages={() => setLangPickerKind("subtitle")}
                     onDownload={downloadAllSubtitlesQueue}
+                    extractedCount={queueSubsExtractedCount}
+                    onBundleExtracted={extractAllSubtitlesQueue}
                   />
                 </div>
               )}
@@ -224,9 +232,9 @@ export default function App() {
             .filter((t) => t.status === "ready")
             .map((t) => ({ id: t.id, name: t.name }))}
           onCancel={() => setLangPickerKind(null)}
-          onConfirm={(codes, fileIds) => {
-            if (langPickerKind === "audio") extractAudioByLanguageQueue(codes, fileIds);
-            else extractSubtitlesByLanguageQueue(codes, fileIds);
+          onConfirm={(codes, fileIds, picks) => {
+            if (langPickerKind === "audio") extractAudioByLanguageQueue(codes, fileIds, picks);
+            else extractSubtitlesByLanguageQueue(codes, fileIds, picks);
             setLangPickerKind(null);
           }}
         />
@@ -248,7 +256,17 @@ export default function App() {
 // through ffmpeg, any already-extracted ones are reused) and zipped together
 // in one go. Audio and subtitles each get their own instance, so the two stay
 // separate zips.
-function QueueBulkAction({ label, status, progress, totalCount, disabled, onPickLanguages, onDownload }) {
+function QueueBulkAction({
+  label,
+  status,
+  progress,
+  totalCount,
+  disabled,
+  onPickLanguages,
+  onDownload,
+  extractedCount = 0,
+  onBundleExtracted,
+}) {
   return (
     <div className="queue__bulk-item">
       <span className="queue__bulk-label">{label}</span>
@@ -281,6 +299,17 @@ function QueueBulkAction({ label, status, progress, totalCount, disabled, onPick
           }
         >
           Target languages…
+        </button>
+      )}
+      {status !== "extracting" && extractedCount > 0 && (
+        <button
+          type="button"
+          className="queue__bulk-btn queue__bulk-btn--muted"
+          disabled={disabled}
+          onClick={onBundleExtracted}
+          title="Zip only the tracks you already extracted by hand, across every file"
+        >
+          Bundle extracted ({extractedCount})
         </button>
       )}
       {status === "error" && <span className="queue__bulk-error">failed</span>}
