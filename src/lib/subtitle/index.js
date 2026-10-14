@@ -319,6 +319,7 @@ export const TOOLS = {
     hint: "Reads the dialogue text and identifies which of 150+ languages it's written in — no audio needed. The file comes back unchanged except for a language-code tag in the filename (movie.bn.srt, movie.en.srt, ...) so players like Plex, Jellyfin, Kodi, and VLC pick up the language automatically. Add more than one file to detect and tag them all in one go.",
     async run(files, options, onProgress) {
       const results = [];
+      const seen = new Map();
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const text = await readText(file);
@@ -328,9 +329,23 @@ export const TOOLS = {
         const ext = isVtt ? "vtt" : "srt";
         const body = isVtt ? toVttText(cues) : toSrtText(cues);
 
-        const name = detected
-          ? `${baseName(file.name)}.${detected.code}.${ext}`
-          : `${baseName(file.name)}.${ext}`;
+        // Drop the trailing "_2", "_13" ... counter that extraction adds, then
+        // tag the language. A second/third subtitle of the same language gets
+        // the code repeated (.en, .en-en, .en-en-en) so names stay unique.
+        const base = baseName(file.name).replace(/_\d+$/, "");
+        let name;
+        if (detected) {
+          const key = `${base}|${detected.code}`;
+          const n = (seen.get(key) || 0) + 1;
+          seen.set(key, n);
+          const tag = Array(n).fill(detected.code).join("-");
+          name = `${base}.${tag}.${ext}`;
+        } else {
+          const key = `${base}|?`;
+          const n = (seen.get(key) || 0) + 1;
+          seen.set(key, n);
+          name = n === 1 ? `${base}.${ext}` : `${base}.${n}.${ext}`;
+        }
         const summary = detected
           ? `${file.name} → ${detected.label} (${detected.code}) · ${Math.round(
               detected.confidence * 100
