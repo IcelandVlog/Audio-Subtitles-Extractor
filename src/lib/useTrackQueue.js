@@ -4,6 +4,7 @@ import {
   probeFile,
   prefetchFileBytes,
   extractSubtitle,
+  isTextSubtitleCodec,
   cleanupInput,
   loadEngine,
   extractAudioNative,
@@ -516,6 +517,73 @@ export function useTrackQueue() {
     [patchStream]
   );
 
+  // Subtitle counterpart of detectAudioLanguage: for a text subtitle track whose
+  // language tag is missing ("und"), pull the track out, read its dialogue and
+  // guess the language from the text (franc + the pt/es/zh variant layer), then
+  // write the result onto the stream like a metadata tag would. The extracted
+  // blob is only used for detection — the row stays "idle" so nothing gets
+  // bundled by accident. Bitmap tracks (PGS/VobSub) have no text, so they can't
+  // be detected this way.
+  const detectSubtitleStreamLanguage = useCallback(
+    async (trackId, streamIndex) => {
+      const track = tracksRef.current.find((t) => t.id === trackId);
+      const stream = track?.subtitleStreams.find((s) => s.index === streamIndex);
+      if (!track || !stream || stream.languageDetectStatus === "detecting") return;
+      if (!isTextSubtitleCodec(stream.codec)) return;
+
+      patchStream(trackId, "subtitle", streamIndex, {
+        languageDetectStatus: "detecting",
+        languageDetectConfidence: null,
+      });
+
+      try {
+        let blob;
+        let extension;
+        if (stream.status === "done" && stream.result?.blob) {
+          blob = stream.result.blob;
+          extension = stream.result.extension;
+        } else {
+          ({ blob, extension } = await extractSubtitle({
+            inputName: track.inputName,
+            streamIndex,
+            codec: stream.codec,
+            language: stream.language,
+          }));
+        }
+
+        const [{ parseAny }, { cuesToPlainText }, { detectSubtitleLanguage }] = await Promise.all([
+          import("./subtitle/formats"),
+          import("./subtitle/tools"),
+          import("./subtitle/langDetect"),
+        ]);
+        const text = await blob.text();
+        const { cues } = parseAny(`track.${extension}`, text);
+        const detected = detectSubtitleLanguage(cuesToPlainText(cues));
+
+        if (!detected) {
+          patchStream(trackId, "subtitle", streamIndex, { languageDetectStatus: "error" });
+          return;
+        }
+
+        // Regional labels already contain brackets ("Portuguese (Brazil)"), so
+        // append the code after a dot instead of nesting a second pair.
+        const label = detected.label.includes("(")
+          ? `${detected.label} · ${detected.code}`
+          : `${detected.label} (${detected.code})`;
+        patchStream(trackId, "subtitle", streamIndex, {
+          language: detected.code,
+          label,
+          languageDetectStatus: "done",
+          languageDetectConfidence: detected.confidence,
+        });
+      } catch (err) {
+        console.error("[detectSubtitleStreamLanguage] failed:", err);
+        patchStream(trackId, "subtitle", streamIndex, { languageDetectStatus: "error" });
+      }
+    },
+    [patchStream]
+  );
+
   // "Download": just saves the already-extracted blob, no re-extraction.
   const downloadOneAudio = useCallback((trackId, streamIndex) => {
     const track = tracksRef.current.find((t) => t.id === trackId);
@@ -925,6 +993,7 @@ export function useTrackQueue() {
     extractOneAudio,
     extractOneSubtitle,
     detectAudioLanguage,
+    detectSubtitleStreamLanguage,
     downloadOneAudio,
     downloadOneSubtitle,
     extractAllAudio,

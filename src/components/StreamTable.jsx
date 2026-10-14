@@ -25,6 +25,36 @@ export default function StreamTable({
   const hasStreams = streams.length > 0;
   const allRunning = allStatus === "extracting";
 
+  // "Detect language" button for a track whose language tag is missing. Audio
+  // tracks are analysed from the sound itself; text subtitle tracks from their
+  // dialogue. Bitmap subtitles (PGS/VobSub) are images, so no button there.
+  const renderDetectButton = (s) => {
+    const unknown = !s.language || s.language === "und";
+    if (!unknown || !onDetectLanguage) return null;
+    if (!isAudio && !isTextSubtitleCodec(s.codec)) return null;
+    return (
+      <button
+        type="button"
+        className="stream-row__detect"
+        disabled={
+          disabled || allRunning || s.status === "extracting" || s.languageDetectStatus === "detecting"
+        }
+        onClick={() => onDetectLanguage(s.index)}
+        title={
+          isAudio
+            ? "Guess the spoken language from the audio itself (runs a small speech model in your browser)"
+            : "Guess the language from this subtitle track's text"
+        }
+      >
+        {s.languageDetectStatus === "detecting"
+          ? "Detecting…"
+          : s.languageDetectStatus === "error"
+          ? "Detect failed — retry"
+          : "Detect language"}
+      </button>
+    );
+  };
+
   return (
     <div className={`stream-table${collapsed ? " stream-table--collapsed" : ""}`}>
       <div
@@ -113,26 +143,11 @@ export default function StreamTable({
                 <span className="stream-row__name" title={s.label}>
                   {s.label}
                 </span>
-                {isAudio && (!s.language || s.language === "und") && (
-                  <button
-                    type="button"
-                    className="stream-row__detect"
-                    disabled={
-                      disabled || allRunning || s.status === "extracting" || s.languageDetectStatus === "detecting"
-                    }
-                    onClick={() => onDetectLanguage(s.index)}
-                    title="Guess the spoken language from the audio itself (runs a small speech model in your browser)"
-                  >
-                    {s.languageDetectStatus === "detecting"
-                      ? "Detecting…"
-                      : s.languageDetectStatus === "error"
-                      ? "Detect failed — retry"
-                      : "Detect language"}
-                  </button>
-                )}
+                {isAudio && renderDetectButton(s)}
                 <span className="stream-row__ext">
                   {isAudio ? null : subtitleOutputLabel(s.codec)}
                 </span>
+                {!isAudio && renderDetectButton(s)}
               </div>
 
               {isAudio && (
