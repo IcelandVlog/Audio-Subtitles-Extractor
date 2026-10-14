@@ -347,10 +347,10 @@ export const TOOLS = {
           name = n === 1 ? `${base}.${ext}` : `${base}.${n}.${ext}`;
         }
         const summary = detected
-          ? `${file.name} → ${detected.label} (${detected.code}) · ${Math.round(
+          ? `${name} → ${detected.label} (${detected.code}) · ${Math.round(
               detected.confidence * 100
             )}% confidence`
-          : `${file.name} → couldn't confidently identify the language`;
+          : `${name} → couldn't confidently identify the language`;
 
         results.push({ name, blob: new Blob([body], { type: "text/plain" }), summary });
         onProgress?.((i + 1) / files.length, { index: i, fraction: 1 });
