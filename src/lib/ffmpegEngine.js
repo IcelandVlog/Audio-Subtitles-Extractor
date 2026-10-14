@@ -93,6 +93,14 @@ export function isTextSubtitleCodec(codec) {
   return SUBTITLE_TEXT_CODECS.has(codec);
 }
 
+// ASS/SSA tracks carry styling, positioning and fonts. Converting them to SRT
+// throws all of that away, so they are stream-copied out as a real .ass file.
+const ASS_CODECS = new Set(["ass", "ssa"]);
+
+export function isAssCodec(codec) {
+  return ASS_CODECS.has(codec);
+}
+
 export function isVobsubCodec(codec) {
   return VOBSUB_CODECS.has(codec);
 }
@@ -100,6 +108,7 @@ export function isVobsubCodec(codec) {
 /** Extension we'll produce for a subtitle stream, without actually running ffmpeg. */
 export function guessSubtitleExtension(codec) {
   if (isVobsubCodec(codec)) return "sub";
+  if (isAssCodec(codec)) return "ass";
   return SUBTITLE_TEXT_CODECS.has(codec) ? "srt" : bitmapSubtitleFormat(codec).extension;
 }
 
@@ -557,7 +566,8 @@ export function extractAudioNativeBatch({ inputName, streams, onProgress }) {
 export function extractSubtitleBatch({ inputName, streams, onProgress }) {
   return runExclusive(async () => {
     const ffmpeg = await loadEngine();
-    const textStreams = streams.filter((s) => SUBTITLE_TEXT_CODECS.has(s.codec));
+    const assStreams = streams.filter((s) => isAssCodec(s.codec));
+    const textStreams = streams.filter((s) => SUBTITLE_TEXT_CODECS.has(s.codec) && !isAssCodec(s.codec));
     const vobsubStreams = streams.filter((s) => isVobsubCodec(s.codec));
     const bitmapStreams = streams.filter((s) => !SUBTITLE_TEXT_CODECS.has(s.codec) && !isVobsubCodec(s.codec));
     const results = {};
@@ -593,6 +603,15 @@ export function extractSubtitleBatch({ inputName, streams, onProgress }) {
         await ffmpeg.deleteFile(outNames[i]).catch(() => {});
       }
     };
+
+    // ASS/SSA: copy as-is into a real .ass file (keeps styling).
+    for (const s of assStreams) {
+      try {
+        results[s.streamIndex] = await extractSubtitle({ inputName, streamIndex: s.streamIndex, codec: s.codec });
+      } catch (err) {
+        console.error(`[subs batch] ass stream ${s.streamIndex} failed:`, err);
+      }
+    }
 
     // Text subtitle -> srt conversion can occasionally fail for a stream
     // ffprobe still called "text" but ffmpeg can't actually convert; fall
@@ -816,6 +835,18 @@ export function extractSubtitle({ inputName, streamIndex, codec, language, onPro
     try {
       if (isVobsubCodec(codec)) {
         return await extractVobsubPair(ffmpeg, { inputName, streamIndex, language });
+      }
+
+      if (isAssCodec(codec)) {
+        const outputName = `subs_${streamIndex}.ass`;
+        try {
+          await execCapturingLog(ffmpeg, [...FAST_OPEN_ARGS, "-i", inputName, "-map", `0:${streamIndex}`, "-c:s", "copy", outputName]);
+          const data = await ffmpeg.readFile(outputName);
+          await ffmpeg.deleteFile(outputName);
+          return { blob: new Blob([data.buffer], { type: "text/x-ssa" }), extension: "ass" };
+        } catch {
+          // fall through to the SRT conversion below
+        }
       }
 
       if (isText) {
