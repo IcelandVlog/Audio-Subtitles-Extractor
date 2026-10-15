@@ -16,6 +16,45 @@ import { cuesToPinyin } from "./pinyin";
 import { detectSubtitleLanguage } from "./langDetect";
 import { compressAudio } from "../ffmpegEngine";
 import JSZip from "jszip";
+import { languageName } from "../languages";
+
+// Strip what an earlier extraction / detection run added to a subtitle's name
+// ("_2", "_2_2_2", ".el", ".pt-br", ".en-en"...) and hand back the clean base name
+// plus the language tag that was already there, if any:
+//   "Home - NetMirror_2.el.srt" -> { base: "Home - NetMirror", tag: "el" }
+//   "Home - NetMirror_2_2.srt"  -> { base: "Home - NetMirror", tag: null }
+// The tag is kept so a file whose language can't be re-detected still ends up as
+// "Home - NetMirror.el.srt" instead of losing its code.
+function splitBaseName(fileName) {
+  let b = baseName(fileName);
+  let tag = null;
+  const rememberTag = (raw) => {
+    if (tag || !raw) return;
+    const t = raw.toLowerCase();
+    // "en-en-en" (duplicate marker) -> "en"; "es-la" / "pt-br" stay as they are
+    const rep = t.match(/^([a-z]{2,3})(?:-\1)+$/);
+    tag = rep ? rep[1] : t;
+  };
+  for (let guard = 0; guard < 20; guard++) {
+    const before = b;
+    const m1 = b.match(/(?:_\d+)+((?:\.[a-z]{2,3}(?:-[a-z0-9]{2,4})*)*)$/i);
+    if (m1) {
+      const tags = m1[1].split(".").filter(Boolean);
+      rememberTag(tags[tags.length - 1]);
+      b = b.slice(0, m1.index);
+    }
+    const m2 = b.match(/^(.+)\.([a-z]{2,3}(?:-[a-z0-9]{2,4})*)$/i);
+    if (m2) {
+      const first = m2[2].split("-")[0].toLowerCase();
+      if (languageName(first) !== first) {
+        rememberTag(m2[2]);
+        b = m2[1];
+      }
+    }
+    if (b === before) break;
+  }
+  return { base: b.trim(), tag };
+}
 
 const OCR_LANG_FIELD = {
   key: "lang",
@@ -332,13 +371,16 @@ export const TOOLS = {
         // Drop the trailing "_2", "_13" ... counter that extraction adds, then
         // tag the language. A second/third subtitle of the same language gets
         // the code repeated (.en, .en-en, .en-en-en) so names stay unique.
-        const base = baseName(file.name).replace(/_\d+$/, "");
+        const { base, tag: oldTag } = splitBaseName(file.name);
+        // Prefer the freshly detected language; if detection fails, keep the code
+        // the file already carried (.en, .el ...) rather than dropping it.
+        const code = detected ? detected.code : oldTag;
         let name;
-        if (detected) {
-          const key = `${base}|${detected.code}`;
+        if (code) {
+          const key = `${base}|${code}`;
           const n = (seen.get(key) || 0) + 1;
           seen.set(key, n);
-          const tag = Array(n).fill(detected.code).join("-");
+          const tag = Array(n).fill(code).join("-");
           name = `${base}.${tag}.${ext}`;
         } else {
           const key = `${base}|?`;
@@ -350,7 +392,7 @@ export const TOOLS = {
           ? `${name} → ${detected.label} (${detected.code}) · ${Math.round(
               detected.confidence * 100
             )}% confidence`
-          : `${name} → couldn't confidently identify the language`;
+          : `${name} → couldn't confidently identify the language${oldTag ? ` (kept .${oldTag})` : ""}`;
 
         results.push({ name, blob: new Blob([body], { type: "text/plain" }), summary });
         onProgress?.((i + 1) / files.length, { index: i, fraction: 1 });
