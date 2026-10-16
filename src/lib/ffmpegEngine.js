@@ -757,7 +757,15 @@ export function compressAudio({ file, format = "mp3", quality = "medium", audioT
         ...FAST_OPEN_ARGS,
         "-i",
         inputName,
+        // Skip streams we don't output (video, subtitles, attachments). In a
+        // multi-language MKV these can be large, and the single-threaded browser
+        // build spends time demuxing them otherwise. Stream tags (language
+        // labels) are kept on purpose.
         "-vn",
+        "-sn",
+        "-dn",
+        "-map_chapters",
+        "-1",
         ...(keepAll ? ["-map", "0:a"] : ["-map", `0:a:${audioTrack}`]),
         "-c:a",
         preset.codec,
