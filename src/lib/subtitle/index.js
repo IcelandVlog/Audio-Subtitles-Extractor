@@ -539,6 +539,7 @@ export const TOOLS = {
           { value: "1", label: "Track 2" },
           { value: "2", label: "Track 3" },
           { value: "3", label: "Track 4" },
+          { value: "all", label: "All tracks together (saves as .mka)" },
         ],
         default: "0",
       },
@@ -549,7 +550,7 @@ export const TOOLS = {
     async run([file], options, onProgress) {
       const format = options.format || "mp3";
       const quality = options.quality || "medium";
-      const audioTrack = Number(options.audioTrack) || 0;
+      const audioTrack = options.audioTrack === "all" ? "all" : Number(options.audioTrack) || 0;
       const { blob, extension } = await compressAudio({ file, format, quality, audioTrack, onProgress });
       return download(`${baseName(file.name)}.compressed.${extension}`, blob, blob.type);
     },

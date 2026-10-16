@@ -738,7 +738,11 @@ export function compressAudio({ file, format = "mp3", quality = "medium", audioT
 
     const preset = COMPRESS_ENCODERS[format] || COMPRESS_ENCODERS.mp3;
     const qualityArgs = preset[quality] || preset.medium;
-    const outputName = `compressed_${Date.now()}.${format}`;
+    // "all" keeps every audio track in one Matroska file, each re-encoded with
+    // the chosen codec. A single chosen track keeps the normal output format.
+    const keepAll = audioTrack === "all";
+    const container = keepAll ? "mka" : format;
+    const outputName = `compressed_${Date.now()}.${container}`;
 
     const progressHandler = ({ progress }) => {
       if (onProgress && Number.isFinite(progress)) onProgress(Math.min(Math.max(progress, 0), 1));
@@ -754,8 +758,7 @@ export function compressAudio({ file, format = "mp3", quality = "medium", audioT
         "-i",
         inputName,
         "-vn",
-        "-map",
-        `0:a:${audioTrack}`,
+        ...(keepAll ? ["-map", "0:a"] : ["-map", `0:a:${audioTrack}`]),
         "-c:a",
         preset.codec,
         ...qualityArgs,
@@ -769,7 +772,10 @@ export function compressAudio({ file, format = "mp3", quality = "medium", audioT
     await ffmpeg.deleteFile(outputName).catch(() => {});
     await cleanupInput(inputName);
 
-    return { blob: new Blob([data.buffer], { type: `audio/${format}` }), extension: format };
+    return {
+      blob: new Blob([data.buffer], { type: keepAll ? "audio/x-matroska" : `audio/${format}` }),
+      extension: container,
+    };
   });
 }
 
