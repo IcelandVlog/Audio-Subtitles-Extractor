@@ -504,7 +504,7 @@ export const TOOLS = {
   "compress-audio": {
     label: "Audio Compressor",
     category: "other",
-    accept: ".mp3,.wav,.aac,.m4a,.ogg,.flac,.wma",
+    accept: ".mp3,.wav,.aac,.m4a,.mka,.opus,.ogg,.flac,.wma",
     fields: [
       {
         key: "format",
@@ -528,6 +528,20 @@ export const TOOLS = {
         ],
         default: "medium",
       },
+      {
+        // Files with several audio tracks (e.g. MKA/MKV with multiple languages
+        // or commentary) need one chosen; the value is the audio-track index.
+        key: "audioTrack",
+        label: "Audio track (for multi-track files)",
+        type: "select",
+        options: [
+          { value: "0", label: "Track 1 (default)" },
+          { value: "1", label: "Track 2" },
+          { value: "2", label: "Track 3" },
+          { value: "3", label: "Track 4" },
+        ],
+        default: "0",
+      },
     ],
     showPercent: true,
     progressLabel: "Compressing",
@@ -535,7 +549,8 @@ export const TOOLS = {
     async run([file], options, onProgress) {
       const format = options.format || "mp3";
       const quality = options.quality || "medium";
-      const { blob, extension } = await compressAudio({ file, format, quality, onProgress });
+      const audioTrack = Number(options.audioTrack) || 0;
+      const { blob, extension } = await compressAudio({ file, format, quality, audioTrack, onProgress });
       return download(`${baseName(file.name)}.compressed.${extension}`, blob, blob.type);
     },
   },

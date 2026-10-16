@@ -718,7 +718,7 @@ const COMPRESS_ENCODERS = {
  * codec — only the bitrate/quality target changes, which is what actually
  * drives file size down while keeping the result close to the original.
  */
-export function compressAudio({ file, format = "mp3", quality = "medium", onProgress }) {
+export function compressAudio({ file, format = "mp3", quality = "medium", audioTrack = 0, onProgress }) {
   return runExclusive(async () => {
     const ffmpeg = await loadEngine();
 
@@ -745,11 +745,17 @@ export function compressAudio({ file, format = "mp3", quality = "medium", onProg
     };
     ffmpeg.on("progress", progressHandler);
     try {
-      await ffmpeg.exec([
+      // Pick exactly one audio track by its audio-relative index. Without an
+      // explicit -map, ffmpeg silently keeps only its own pick of one track
+      // from a multi-track file (e.g. a Matroska with two languages), so the
+      // user could never choose the one they wanted.
+      await execCapturingLog(ffmpeg, [
         ...FAST_OPEN_ARGS,
         "-i",
         inputName,
         "-vn",
+        "-map",
+        `0:a:${audioTrack}`,
         "-c:a",
         preset.codec,
         ...qualityArgs,
