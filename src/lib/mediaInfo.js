@@ -294,7 +294,7 @@ export function reportToText(reports) {
   const many = reports.length > 1;
 
   reports.forEach((r, idx) => {
-    const head = many ? `File ${idx + 1}: ${r.fileName}` : `File: ${r.fileName}`;
+    const head = `File ${idx + 1}: ${r.fileName}`;
     // Double line above and below the file name only; other lines stay plain.
     lines.push("=".repeat(head.length), head, "=".repeat(head.length));
     lines.push(`Size: ${r.sizeText}`);
