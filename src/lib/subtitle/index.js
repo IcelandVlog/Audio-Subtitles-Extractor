@@ -576,8 +576,11 @@ export const TOOLS = {
         reports.push(parseMediaInfo(log, files[i].size, files[i].name));
         if (onProgress) onProgress((i + 1) / files.length, { index: i, fraction: 1 });
       }
+      // One .txt for everything. With several files each file gets its own
+      // numbered section inside it, with the comparison at the end.
       const name = files.length === 1 ? `${baseName(files[0].name)}.media-info.txt` : "media-info.txt";
       return { ...download(name, reportToText(reports), "text/plain"), report: reports };
+
     },
   },
 };
