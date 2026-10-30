@@ -2002,3 +2002,10 @@
 .mediainfo__list { margin: 4px 0 0; padding-left: 0; list-style: none; font-size: 0.9rem; }
 .mediainfo__list li { padding: 2px 0; }
 @media (max-width: 480px) { .mediainfo__grid { grid-template-columns: 1fr 1fr; } }
+.mediainfo__tablewrap { overflow-x: auto; }
+.mediainfo__table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.mediainfo__table th, .mediainfo__table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid rgba(127, 127, 127, 0.2); white-space: nowrap; }
+.mediainfo__table th { font-weight: 600; opacity: 0.7; }
+.mediainfo__name { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+.mediainfo__best { font-weight: 700; color: #3fb950; background: rgba(63, 185, 80, 0.12); }
+.mediainfo__verdicts { margin-top: 10px; }

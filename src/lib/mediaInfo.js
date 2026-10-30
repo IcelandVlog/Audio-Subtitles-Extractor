@@ -126,7 +126,36 @@ function parseVideoStream(index, language, rest, containerBitrateKbps) {
   };
 }
 
+// Friendly names for common subtitle codecs (ffmpeg's internal names are
+// hard to read: "subrip", "hdmv_pgs_subtitle", ...).
+const SUBTITLE_NAMES = {
+  subrip: "SRT",
+  ass: "ASS",
+  ssa: "SSA",
+  webvtt: "WebVTT",
+  mov_text: "MP4 text",
+  hdmv_pgs_subtitle: "PGS (Blu-ray)",
+  dvd_subtitle: "VobSub (DVD)",
+  dvb_subtitle: "DVB",
+};
+
+function parseSubtitleStream(index, language, rest) {
+
+  const codecMatch = rest.match(/^([A-Za-z0-9_]+)/);
+  const flags = [];
+  if (/\(default\)/.test(rest)) flags.push("default");
+  if (/\(forced\)/.test(rest)) flags.push("forced");
+  if (/\(hearing impaired\)|\(sdh\)/i.test(rest)) flags.push("SDH");
+  return {
+    index,
+    language,
+    codec: codecMatch ? (SUBTITLE_NAMES[codecMatch[1].toLowerCase()] || codecMatch[1].toLowerCase()) : "unknown",
+    flags,
+  };
+}
+
 function parseAudioStream(index, language, rest) {
+
   const codecMatch = rest.match(/^([A-Za-z0-9_]+)/);
   const sampleMatch = rest.match(/(\d+) Hz, ([^,]+),/);
   const brMatch = rest.match(/(\d+) kb\/s/);
@@ -178,7 +207,9 @@ export function parseMediaInfo(log, sizeBytes, fileName) {
     .filter((s) => s.kind === "Video")
     .map((s) => parseVideoStream(s.index, s.language, s.rest, videoFallbackKbps));
 
-  const subtitles = streams.filter((s) => s.kind === "Subtitle").length;
+  const subtitleTracks = streams
+    .filter((s) => s.kind === "Subtitle")
+    .map((s) => parseSubtitleStream(s.index, s.language, s.rest));
 
   return {
     fileName,
@@ -190,7 +221,8 @@ export function parseMediaInfo(log, sizeBytes, fileName) {
     overallBitrateKbps,
     video,
     audio,
-    subtitles,
+    subtitles: subtitleTracks.length,
+    subtitleTracks,
     hasVideo: video.length > 0,
   };
 }
@@ -224,6 +256,11 @@ export function reportToText(reports) {
       );
     });
     lines.push(`Subtitle tracks: ${r.subtitles}`);
+    r.subtitleTracks.forEach((s, i) => {
+      lines.push(
+        `Subtitle ${i + 1}: ${s.codec}${s.language ? ` [${s.language}]` : ""}${s.flags.length ? ` (${s.flags.join(", ")})` : ""}`
+      );
+    });
     lines.push("");
   }
   return lines.join("\n");
