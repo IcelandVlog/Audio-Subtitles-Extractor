@@ -2027,3 +2027,33 @@
   .mediainfo { width: 100%; margin-left: 0; }
   .mediainfo__tracks { grid-template-columns: 1fr; }
 }
+
+/* Video Info layout fixes: contain content on phones, fixed-height cards that
+   scroll inside, and a wider page on large screens. */
+.shell:has(.mediainfo) { max-width: min(1280px, 96vw); }
+.tool-page:has(.mediainfo) { max-width: none; width: 100%; }
+.mediainfo {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  width: 100%;
+  margin-left: 0;
+  font-size: clamp(14px, 0.4vw + 12px, 20px);
+  box-sizing: border-box;
+}
+.mediainfo__card {
+  min-width: 0;
+  box-sizing: border-box;
+  max-height: 72vh;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+.mediainfo__summary { max-height: 60vh; }
+.mediainfo__verdicts li,
+.mediainfo__title,
+.mediainfo__value { overflow-wrap: anywhere; }
+.mediainfo__tablewrap { max-width: 100%; }
+@media (max-width: 640px) {
+  .mediainfo__table th, .mediainfo__table td { padding: 5px 6px; font-size: 12px; }
+  .mediainfo__card { padding: 12px; max-height: 80vh; }
+  .mediainfo__name { max-width: 120px; }
+}
