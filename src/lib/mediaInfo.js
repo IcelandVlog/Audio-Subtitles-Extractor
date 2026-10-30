@@ -16,10 +16,12 @@ function languageNameFor(code) {
 
 // Label for a track: "Language (Track name) {code}", e.g. "Spanish (Spain) {es-es}".
 // The track name part is left out when the file has none; the code in braces
-// is left out when there is no language tag. "und" is shown as Unknown.
+// is left out when there is no language tag. "und" (undetermined) is shown as
+// "Unknown {und}" so the tag is still visible.
 export function formatTrackLanguage(code, title) {
-  const hasCode = !!code && code.toLowerCase() !== "und";
-  const name = hasCode ? languageNameFor(code) : "Unknown";
+  const hasCode = !!code;
+  const undetermined = hasCode && code.toLowerCase() === "und";
+  const name = hasCode && !undetermined ? languageNameFor(code) : "Unknown";
   const namePart = title ? `${name} (${title})` : name;
   if (!hasCode) return namePart;
   return `${namePart} {${code}}`;
@@ -309,6 +311,7 @@ export function reportToText(reports) {
       if (v.quality) lines.push(`  Quality: ${v.quality.label} - ${v.quality.note}`);
       if (v.hdr) lines.push("  HDR: yes");
     });
+    lines.push(`Audio tracks: ${r.audio.length}`);
     r.audio.forEach((a, i) => {
       lines.push(
         `Audio ${i + 1}: ${a.codec} - ${a.languageText}` +
