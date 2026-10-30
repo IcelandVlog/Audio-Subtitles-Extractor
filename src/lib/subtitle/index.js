@@ -16,6 +16,7 @@ import { cuesToPinyin } from "./pinyin";
 import { detectSubtitleLanguage } from "./langDetect";
 import { compressAudio, readMediaLog } from "../ffmpegEngine";
 import { parseMediaInfo, reportToText } from "../mediaInfo";
+import { readMkvLanguages } from "../mkvLanguages";
 import JSZip from "jszip";
 import { languageName } from "../languages";
 
@@ -573,7 +574,8 @@ export const TOOLS = {
       for (let i = 0; i < files.length; i++) {
         if (onProgress) onProgress(i / files.length, { index: i, fraction: 0 });
         const log = await readMediaLog(files[i]);
-        reports.push(parseMediaInfo(log, files[i].size, files[i].name));
+        const languageByIndex = await readMkvLanguages(files[i]);
+        reports.push(parseMediaInfo(log, files[i].size, files[i].name, { languageByIndex }));
         if (onProgress) onProgress((i + 1) / files.length, { index: i, fraction: 1 });
       }
       // One .txt for everything. With several files each file gets its own

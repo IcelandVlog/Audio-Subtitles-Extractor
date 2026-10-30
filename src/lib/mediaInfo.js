@@ -220,7 +220,10 @@ function parseAudioStream(index, language, rest) {
  * @param {number} sizeBytes  size of the source file
  * @param {string} fileName
  */
-export function parseMediaInfo(log, sizeBytes, fileName) {
+export function parseMediaInfo(log, sizeBytes, fileName, options = {}) {
+  // Full BCP-47 codes (e.g. pt-BR) read from the container, keyed by stream
+  // index. They win over the ISO code ffmpeg prints (e.g. por).
+  const ietf = options.languageByIndex || new Map();
   // Container list is comma-separated (e.g. "mov,mp4,m4a,3gp,3g2,mj2"), so take the whole text before ", from".
   const inputMatch = log.match(/Input #0, (.+?), from /);
   const container = inputMatch ? inputMatch[1].trim() : "unknown";
@@ -248,7 +251,8 @@ export function parseMediaInfo(log, sizeBytes, fileName) {
     .filter((s) => s.kind === "Audio")
     .map((s) => {
       const title = titles.get(s.index) || null;
-      return { ...parseAudioStream(s.index, s.language, s.rest), title, languageText: formatTrackLanguage(s.language, title) };
+      const lang = ietf.get(s.index) || s.language;
+      return { ...parseAudioStream(s.index, lang, s.rest), title, languageText: formatTrackLanguage(lang, title) };
     });
   const audioKbps = audio.reduce((sum, a) => sum + (a.bitrateKbps || 0), 0);
   // Video bitrate fallback: container total minus known audio bitrate.
@@ -263,7 +267,8 @@ export function parseMediaInfo(log, sizeBytes, fileName) {
     .filter((s) => s.kind === "Subtitle")
     .map((s) => {
       const title = titles.get(s.index) || null;
-      return { ...parseSubtitleStream(s.index, s.language, s.rest), title, languageText: formatTrackLanguage(s.language, title) };
+      const lang = ietf.get(s.index) || s.language;
+      return { ...parseSubtitleStream(s.index, lang, s.rest), title, languageText: formatTrackLanguage(lang, title) };
     });
 
   return {
@@ -289,7 +294,9 @@ export function reportToText(reports) {
   const many = reports.length > 1;
 
   reports.forEach((r, idx) => {
-    lines.push(many ? `File ${idx + 1}: ${r.fileName}` : `File: ${r.fileName}`);
+    const head = many ? `File ${idx + 1}: ${r.fileName}` : `File: ${r.fileName}`;
+    // Double line above and below the file name only; other lines stay plain.
+    lines.push("=".repeat(head.length), head, "=".repeat(head.length));
     lines.push(`Size: ${r.sizeText}`);
     lines.push(`Length: ${r.durationText}`);
     lines.push(`Container: ${r.container}`);
