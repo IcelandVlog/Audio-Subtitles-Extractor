@@ -571,9 +571,10 @@ export const TOOLS = {
     async run(files, options, onProgress) {
       const reports = [];
       for (let i = 0; i < files.length; i++) {
+        if (onProgress) onProgress(i / files.length, { index: i, fraction: 0 });
         const log = await readMediaLog(files[i]);
         reports.push(parseMediaInfo(log, files[i].size, files[i].name));
-        if (onProgress) onProgress((i + 1) / files.length);
+        if (onProgress) onProgress((i + 1) / files.length, { index: i, fraction: 1 });
       }
       const name = files.length === 1 ? `${baseName(files[0].name)}.media-info.txt` : "media-info.txt";
       return { ...download(name, reportToText(reports), "text/plain"), report: reports };

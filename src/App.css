@@ -2009,3 +2009,21 @@
 .mediainfo__name { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
 .mediainfo__best { font-weight: 700; color: #3fb950; background: rgba(63, 185, 80, 0.12); }
 .mediainfo__verdicts { margin-top: 10px; }
+
+/* Video Info: bigger on large screens, audio and subtitles side by side */
+.mediainfo {
+  width: min(1100px, 92vw);
+  margin-left: calc(50% - min(1100px, 92vw) / 2);
+  font-size: clamp(14px, 0.5vw + 11px, 20px);
+}
+.mediainfo .mediainfo__label { font-size: 0.8em; }
+.mediainfo .mediainfo__title { font-size: 1.15em; }
+.mediainfo .mediainfo__subtitle { font-size: 1em; }
+.mediainfo .mediainfo__table { font-size: 0.9em; }
+.mediainfo .mediainfo__muted { font-size: 0.9em; }
+.mediainfo .mediainfo__list { font-size: 1em; }
+.mediainfo__tracks { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; align-items: start; }
+@media (max-width: 640px) {
+  .mediainfo { width: 100%; margin-left: 0; }
+  .mediainfo__tracks { grid-template-columns: 1fr; }
+}

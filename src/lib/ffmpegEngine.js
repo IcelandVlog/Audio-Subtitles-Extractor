@@ -934,14 +934,9 @@ export function readMediaLog(file) {
   return runExclusive(async () => {
     const ffmpeg = await loadEngine();
 
-    let inputName;
-    if (file.size <= MEMFS_SAFE_BYTES) {
-      inputName = safeName(file.name) || `input_${Date.now()}`;
-      const data = await readFileWithProgress(file);
-      await ffmpeg.writeFile(inputName, data);
-    } else {
-      inputName = await mountInputFile(ffmpeg, file);
-    }
+    // Mount the file (WORKERFS) instead of copying it into memory: ffmpeg
+    // only needs the header, so a multi-GB file is ready immediately.
+    const inputName = await mountInputFile(ffmpeg, file);
 
     let log = "";
     const collector = ({ message }) => {

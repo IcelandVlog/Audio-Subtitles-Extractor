@@ -227,41 +227,66 @@ export function parseMediaInfo(log, sizeBytes, fileName) {
   };
 }
 
-/** Plain-text version of the report, used for the downloadable .txt file. */
+/** Plain-text version of the report, laid out one fact per line. */
 export function reportToText(reports) {
+  const W = 16; // label column width
+  const row = (label, value) => `  ${label.padEnd(W)}: ${value}`;
+  const rule = "=".repeat(60);
   const lines = [];
+
+  if (reports.length > 1) {
+    lines.push(rule, `COMPARISON (${reports.length} files)`, rule);
+    reports.forEach((r, i) => {
+      const v = r.video[0];
+      const res = v && v.width && v.height ? `${v.width}x${v.height}` : "-";
+      lines.push(`${i + 1}. ${r.fileName}`);
+      lines.push(row("Length", r.durationText));
+      lines.push(row("File size", r.sizeText));
+      lines.push(row("Resolution", res));
+      lines.push(row("Frame rate", v && v.fps ? `${v.fps} fps` : "-"));
+      lines.push(row("Video bitrate", v && v.bitrateKbps ? `${v.bitrateKbps} kb/s` : "-"));
+      lines.push(row("Quality", v && v.quality ? v.quality.label : "-"));
+      lines.push("");
+    });
+  }
+
   for (const r of reports) {
-    lines.push(`File: ${r.fileName}`);
-    lines.push(`Size: ${r.sizeText}`);
-    lines.push(`Length: ${r.durationText}`);
-    lines.push(`Container: ${r.container}`);
-    if (r.overallBitrateKbps) lines.push(`Overall bitrate: ${r.overallBitrateKbps} kb/s`);
+    lines.push(rule, `FILE: ${r.fileName}`, rule);
+    lines.push(row("Length", r.durationText));
+    lines.push(row("File size", r.sizeText));
+    lines.push(row("Container", r.container));
+    if (r.overallBitrateKbps) lines.push(row("Overall bitrate", `${r.overallBitrateKbps} kb/s`));
+    lines.push("");
+
+    if (r.video.length === 0) lines.push("VIDEO: none (audio only)", "");
     r.video.forEach((v, i) => {
-      lines.push(`Video ${i + 1}: ${v.codec}${v.profile ? ` (${v.profile})` : ""}`);
-      if (v.width && v.height) lines.push(`  Resolution: ${v.width}x${v.height}${resolutionClass(v.width, v.height) ? ` (${resolutionClass(v.width, v.height)})` : ""}`);
-      if (v.fps) lines.push(`  Frame rate: ${v.fps} fps`);
-      if (v.bitrateKbps) {
-        lines.push(`  Video bitrate: ${v.bitrateKbps} kb/s${v.bitrateEstimated ? " (estimated)" : ""}`);
-      }
-      if (v.quality) {
-        lines.push(`  Quality: ${v.quality.label} - ${v.quality.note}`);
-      }
-      if (v.hdr) lines.push("  HDR: yes");
+      const title = `VIDEO${r.video.length > 1 ? ` ${i + 1}` : ""}: ${v.codec}${v.profile ? ` (${v.profile})` : ""}`;
+      lines.push(title);
+      lines.push(row("Resolution", v.width && v.height ? `${v.width}x${v.height} - ${resolutionClass(v.width, v.height)}` : "unknown"));
+      lines.push(row("Frame rate", v.fps ? `${v.fps} fps` : "unknown"));
+      lines.push(row("Bitrate", v.bitrateKbps ? `${v.bitrateKbps} kb/s${v.bitrateEstimated ? " (estimated)" : ""}` : "unknown"));
+      if (v.pixelFormat) lines.push(row("Pixel format", v.pixelFormat));
+      if (v.hdr) lines.push(row("HDR", "Yes"));
+      if (v.quality) lines.push(row("Quality", `${v.quality.label} - ${v.quality.note}`));
+      lines.push("");
     });
+
+    lines.push(`AUDIO TRACKS (${r.audio.length})`);
+    if (r.audio.length === 0) lines.push("  none");
     r.audio.forEach((a, i) => {
-      lines.push(
-        `Audio ${i + 1}: ${a.codec}${a.language ? ` [${a.language}]` : ""}` +
-          `${a.channels ? `, ${a.channels}` : ""}${a.sampleRate ? `, ${a.sampleRate} Hz` : ""}` +
-          `${a.bitrateKbps ? `, ${a.bitrateKbps} kb/s` : ""}`
-      );
-    });
-    lines.push(`Subtitle tracks: ${r.subtitles}`);
-    r.subtitleTracks.forEach((s, i) => {
-      lines.push(
-        `Subtitle ${i + 1}: ${s.codec}${s.language ? ` [${s.language}]` : ""}${s.flags.length ? ` (${s.flags.join(", ")})` : ""}`
-      );
+      const head = [a.codec, a.language ? `[${a.language}]` : null].filter(Boolean).join(" ");
+      const rest = [a.channels, a.sampleRate ? `${a.sampleRate} Hz` : null, a.bitrateKbps ? `${a.bitrateKbps} kb/s` : null].filter(Boolean);
+      lines.push(`  ${i + 1}. ${[head, ...rest].join(", ")}`);
     });
     lines.push("");
+
+    lines.push(`SUBTITLE TRACKS (${r.subtitleTracks.length})`);
+    if (r.subtitleTracks.length === 0) lines.push("  none");
+    r.subtitleTracks.forEach((s, i) => {
+      const parts = [s.codec, s.language ? `[${s.language}]` : null, s.flags.length ? `(${s.flags.join(", ")})` : null];
+      lines.push(`  ${i + 1}. ${parts.filter(Boolean).join(" ")}`);
+    });
+    lines.push("", "");
   }
   return lines.join("\n");
 }

@@ -165,6 +165,7 @@ export default function MediaInfoReport({ reports }) {
             </div>
           ))}
 
+          <div className="mediainfo__tracks">
           {r.audio.length > 0 && (
             <div className="mediainfo__block">
               <h4 className="mediainfo__subtitle">Audio tracks ({r.audio.length})</h4>
@@ -196,6 +197,7 @@ export default function MediaInfoReport({ reports }) {
               </ul>
             </div>
           )}
+          </div>
         </section>
       ))}
     </div>
