@@ -3,18 +3,26 @@
 // bitrate, a bits-per-pixel quality estimate, and audio/subtitle stream info.
 // Kept free of ffmpeg imports so it can be unit-tested on plain log text.
 
-import { languageLabel } from "./languages";
+import { languageName } from "./languages";
 
-// Full language text for a stream: "English (eng)", or "Unknown" when the
-// stream has no language tag or it is "und" (undetermined). Region codes such
-// as "pt-BR" fall back to the base language: "Portuguese (pt-BR)".
-function langText(code) {
-  if (!code || code.toLowerCase() === "und") return "Unknown";
-  const full = languageLabel(code);
+// Language name for a code: "Portuguese" for "por" or "pt-BR" (region codes
+// fall back to the base language). Unknown codes are returned as they are.
+function languageNameFor(code) {
+  const full = languageName(code);
   if (full !== code || !code.includes("-")) return full;
-  const base = code.split("-")[0];
-  const baseLabel = languageLabel(base);
-  return baseLabel !== base ? `${baseLabel.replace(/ \([^)]*\)$/, "")} (${code})` : code;
+  const base = languageName(code.split("-")[0]);
+  return base !== code.split("-")[0] ? base : code;
+}
+
+// Label for a track: "Language (Track name) {code}", e.g. "Spanish (Spain) {es-es}".
+// The track name part is left out when the file has none; the code in braces
+// is left out when there is no language tag. "und" is shown as Unknown.
+export function formatTrackLanguage(code, title) {
+  const hasCode = !!code && code.toLowerCase() !== "und";
+  const name = hasCode ? languageNameFor(code) : "Unknown";
+  const namePart = title ? `${name} (${title})` : name;
+  if (!hasCode) return namePart;
+  return `${namePart} {${code}}`;
 }
 
 // Track names (the MKV "Name" / ffmpeg "title" tag) per stream index. ffmpeg
@@ -187,7 +195,6 @@ function parseSubtitleStream(index, language, rest) {
   return {
     index,
     language,
-    languageText: langText(language),
     codec: codecMatch ? (SUBTITLE_NAMES[codecMatch[1].toLowerCase()] || codecMatch[1].toLowerCase()) : "unknown",
     flags,
   };
@@ -201,7 +208,6 @@ function parseAudioStream(index, language, rest) {
   return {
     index,
     language,
-    languageText: langText(language),
     codec: codecMatch ? codecMatch[1].toLowerCase() : "unknown",
     sampleRate: sampleMatch ? Number(sampleMatch[1]) : null,
     channels: sampleMatch ? sampleMatch[2].trim() : null,
@@ -240,7 +246,10 @@ export function parseMediaInfo(log, sizeBytes, fileName) {
   const titles = extractStreamTitles(log);
   const audio = streams
     .filter((s) => s.kind === "Audio")
-    .map((s) => ({ ...parseAudioStream(s.index, s.language, s.rest), title: titles.get(s.index) || null }));
+    .map((s) => {
+      const title = titles.get(s.index) || null;
+      return { ...parseAudioStream(s.index, s.language, s.rest), title, languageText: formatTrackLanguage(s.language, title) };
+    });
   const audioKbps = audio.reduce((sum, a) => sum + (a.bitrateKbps || 0), 0);
   // Video bitrate fallback: container total minus known audio bitrate.
   const videoFallbackKbps =
@@ -252,7 +261,10 @@ export function parseMediaInfo(log, sizeBytes, fileName) {
 
   const subtitleTracks = streams
     .filter((s) => s.kind === "Subtitle")
-    .map((s) => ({ ...parseSubtitleStream(s.index, s.language, s.rest), title: titles.get(s.index) || null }));
+    .map((s) => {
+      const title = titles.get(s.index) || null;
+      return { ...parseSubtitleStream(s.index, s.language, s.rest), title, languageText: formatTrackLanguage(s.language, title) };
+    });
 
   return {
     fileName,
@@ -292,14 +304,14 @@ export function reportToText(reports) {
     });
     r.audio.forEach((a, i) => {
       lines.push(
-        `Audio ${i + 1}: ${a.codec} - ${a.languageText}${a.title ? ` - ${a.title}` : ""}` +
+        `Audio ${i + 1}: ${a.codec} - ${a.languageText}` +
           `${a.channels ? `, ${a.channels}` : ""}${a.sampleRate ? `, ${a.sampleRate} Hz` : ""}` +
           `${a.bitrateKbps ? `, ${a.bitrateKbps} kb/s` : ""}`
       );
     });
     lines.push(`Subtitle tracks: ${r.subtitleTracks.length}`);
     r.subtitleTracks.forEach((s, i) => {
-      lines.push(`Subtitle ${i + 1}: ${s.codec} - ${s.languageText}${s.title ? ` - ${s.title}` : ""}${s.flags.length ? ` (${s.flags.join(", ")})` : ""}`);
+      lines.push(`Subtitle ${i + 1}: ${s.codec} - ${s.languageText}${s.flags.length ? ` (${s.flags.join(", ")})` : ""}`);
     });
     lines.push("");
   });

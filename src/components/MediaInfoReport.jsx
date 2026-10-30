@@ -173,7 +173,7 @@ export default function MediaInfoReport({ reports }) {
                 {r.audio.map((a, j) => (
                   <li key={`a-${j}`}>
                     {j + 1}. {a.codec}
-                    {` - ${a.languageText}${a.title ? ` - ${a.title}` : ""}`}
+                    {` - ${a.languageText}`}
                     {a.channels ? `, ${a.channels}` : ""}
                     {a.sampleRate ? `, ${a.sampleRate} Hz` : ""}
                     {a.bitrateKbps ? `, ${a.bitrateKbps} kb/s` : ""}
@@ -190,7 +190,7 @@ export default function MediaInfoReport({ reports }) {
                 {r.subtitleTracks.map((s, j) => (
                   <li key={`s-${j}`}>
                     {j + 1}. {s.codec}
-                    {` - ${s.languageText}${s.title ? ` - ${s.title}` : ""}`}
+                    {` - ${s.languageText}`}
                     {s.flags.length ? ` (${s.flags.join(", ")})` : ""}
                   </li>
                 ))}
