@@ -3,6 +3,44 @@
 // bitrate, a bits-per-pixel quality estimate, and audio/subtitle stream info.
 // Kept free of ffmpeg imports so it can be unit-tested on plain log text.
 
+import { languageLabel } from "./languages";
+
+// Full language text for a stream: "English (eng)", or "Unknown" when the
+// stream has no language tag or it is "und" (undetermined). Region codes such
+// as "pt-BR" fall back to the base language: "Portuguese (pt-BR)".
+function langText(code) {
+  if (!code || code.toLowerCase() === "und") return "Unknown";
+  const full = languageLabel(code);
+  if (full !== code || !code.includes("-")) return full;
+  const base = code.split("-")[0];
+  const baseLabel = languageLabel(base);
+  return baseLabel !== base ? `${baseLabel.replace(/ \([^)]*\)$/, "")} (${code})` : code;
+}
+
+// Track names (the MKV "Name" / ffmpeg "title" tag) per stream index. ffmpeg
+// prints each stream's metadata indented under its "Stream #0:N" line; a
+// Chapter line ends that stream's block so chapter titles are not mixed in.
+function extractStreamTitles(log) {
+  const titles = new Map();
+  let current = null;
+  for (const line of log.split("\n")) {
+    const streamMatch = line.match(/Stream #0:(\d+)/);
+    if (streamMatch) {
+      current = Number(streamMatch[1]);
+      continue;
+    }
+    if (/^\s*Chapter #/.test(line) || /^Input #/.test(line)) {
+      current = null;
+      continue;
+    }
+    const titleMatch = line.match(/^\s{4,}title\s*:\s*(.+?)\s*$/);
+    if (titleMatch && current !== null && !titles.has(current)) {
+      titles.set(current, titleMatch[1]);
+    }
+  }
+  return titles;
+}
+
 // Rough efficiency of each codec relative to H.264. A bits-per-pixel value
 // means more quality from newer codecs, so it is scaled up before rating.
 const CODEC_EFFICIENCY = {
@@ -149,6 +187,7 @@ function parseSubtitleStream(index, language, rest) {
   return {
     index,
     language,
+    languageText: langText(language),
     codec: codecMatch ? (SUBTITLE_NAMES[codecMatch[1].toLowerCase()] || codecMatch[1].toLowerCase()) : "unknown",
     flags,
   };
@@ -162,6 +201,7 @@ function parseAudioStream(index, language, rest) {
   return {
     index,
     language,
+    languageText: langText(language),
     codec: codecMatch ? codecMatch[1].toLowerCase() : "unknown",
     sampleRate: sampleMatch ? Number(sampleMatch[1]) : null,
     channels: sampleMatch ? sampleMatch[2].trim() : null,
@@ -191,13 +231,16 @@ export function parseMediaInfo(log, sizeBytes, fileName) {
   while ((m = streamRegex.exec(log)) !== null) {
     streams.push({
       index: Number(m[1]),
-      language: m[2] && m[2] !== "und" ? m[2] : null,
+      language: m[2] || null,
       kind: m[3],
       rest: m[4].trim(),
     });
   }
 
-  const audio = streams.filter((s) => s.kind === "Audio").map((s) => parseAudioStream(s.index, s.language, s.rest));
+  const titles = extractStreamTitles(log);
+  const audio = streams
+    .filter((s) => s.kind === "Audio")
+    .map((s) => ({ ...parseAudioStream(s.index, s.language, s.rest), title: titles.get(s.index) || null }));
   const audioKbps = audio.reduce((sum, a) => sum + (a.bitrateKbps || 0), 0);
   // Video bitrate fallback: container total minus known audio bitrate.
   const videoFallbackKbps =
@@ -209,7 +252,7 @@ export function parseMediaInfo(log, sizeBytes, fileName) {
 
   const subtitleTracks = streams
     .filter((s) => s.kind === "Subtitle")
-    .map((s) => parseSubtitleStream(s.index, s.language, s.rest));
+    .map((s) => ({ ...parseSubtitleStream(s.index, s.language, s.rest), title: titles.get(s.index) || null }));
 
   return {
     fileName,
@@ -249,14 +292,14 @@ export function reportToText(reports) {
     });
     r.audio.forEach((a, i) => {
       lines.push(
-        `Audio ${i + 1}: ${a.codec}${a.language ? ` [${a.language}]` : ""}` +
+        `Audio ${i + 1}: ${a.codec} - ${a.languageText}${a.title ? ` - ${a.title}` : ""}` +
           `${a.channels ? `, ${a.channels}` : ""}${a.sampleRate ? `, ${a.sampleRate} Hz` : ""}` +
           `${a.bitrateKbps ? `, ${a.bitrateKbps} kb/s` : ""}`
       );
     });
     lines.push(`Subtitle tracks: ${r.subtitleTracks.length}`);
     r.subtitleTracks.forEach((s, i) => {
-      lines.push(`Subtitle ${i + 1}: ${s.codec}${s.language ? ` [${s.language}]` : ""}${s.flags.length ? ` (${s.flags.join(", ")})` : ""}`);
+      lines.push(`Subtitle ${i + 1}: ${s.codec} - ${s.languageText}${s.title ? ` - ${s.title}` : ""}${s.flags.length ? ` (${s.flags.join(", ")})` : ""}`);
     });
     lines.push("");
   });
@@ -265,8 +308,14 @@ export function reportToText(reports) {
     lines.push("Comparison:");
     reports.forEach((r, i) => {
       const v = r.video[0];
-      const res = v && v.width && v.height ? `${v.width}x${v.height}` : "-";
-      lines.push(`  ${i + 1}. ${r.fileName} | ${r.durationText} | ${r.sizeText} | ${res} | ${v && v.fps ? `${v.fps} fps` : "-"} | ${v && v.bitrateKbps ? `${v.bitrateKbps} kb/s` : "-"} | ${v && v.quality ? v.quality.label : "-"}`);
+      lines.push(`  ${i + 1}. ${r.fileName}`);
+      lines.push(`     Length: ${r.durationText}`);
+      lines.push(`     Size: ${r.sizeText}`);
+      lines.push(`     Resolution: ${v && v.width && v.height ? `${v.width}x${v.height}` : "-"}`);
+      lines.push(`     Frame rate: ${v && v.fps ? `${v.fps} fps` : "-"}`);
+      lines.push(`     Video bitrate: ${v && v.bitrateKbps ? `${v.bitrateKbps} kb/s` : "-"}`);
+      lines.push(`     Quality: ${v && v.quality ? v.quality.label : "-"}`);
+      lines.push("");
     });
   }
   return lines.join("\n");
