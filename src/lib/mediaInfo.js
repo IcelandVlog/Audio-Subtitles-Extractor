@@ -23,7 +23,27 @@ function parseDurationSeconds(text) {
   return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]);
 }
 
+/**
+ * Name a frame size by its height (the usual way video is labelled):
+ * 480p, 720p, 1080p, 2K (1440p), 4K (2160p), 8K (4320p). Widths are used as
+ * a fallback for odd heights, e.g. DCI 2K (2048 px wide).
+ */
+export function resolutionClass(width, height) {
+  if (!width || !height) return null;
+  // Letterboxed film (e.g. 1920x800 cinemascope) is still a 1080p frame, so
+  // also consider the height a 16:9 frame of this width would have.
+  const h = Math.max(height, Math.round((width * 9) / 16));
+  if (h >= 4320) return "8K";
+  if (h >= 2160) return "4K";
+  if (h >= 1440 || width >= 2048) return "2K";
+  if (h >= 1080) return "1080p (Full HD)";
+  if (h >= 720) return "720p (HD)";
+  if (h >= 480) return "480p (SD)";
+  return `${h}p (below SD)`;
+}
+
 export function formatDuration(seconds) {
+
   if (!Number.isFinite(seconds) || seconds < 0) return "unknown";
   const total = Math.round(seconds);
   const h = Math.floor(total / 3600);
@@ -186,7 +206,7 @@ export function reportToText(reports) {
     if (r.overallBitrateKbps) lines.push(`Overall bitrate: ${r.overallBitrateKbps} kb/s`);
     r.video.forEach((v, i) => {
       lines.push(`Video ${i + 1}: ${v.codec}${v.profile ? ` (${v.profile})` : ""}`);
-      if (v.width && v.height) lines.push(`  Resolution: ${v.width}x${v.height}`);
+      if (v.width && v.height) lines.push(`  Resolution: ${v.width}x${v.height}${resolutionClass(v.width, v.height) ? ` (${resolutionClass(v.width, v.height)})` : ""}`);
       if (v.fps) lines.push(`  Frame rate: ${v.fps} fps`);
       if (v.bitrateKbps) {
         lines.push(`  Video bitrate: ${v.bitrateKbps} kb/s${v.bitrateEstimated ? " (estimated)" : ""}`);

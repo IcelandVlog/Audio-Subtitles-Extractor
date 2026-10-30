@@ -1,3 +1,5 @@
+import { resolutionClass } from "../lib/mediaInfo";
+
 const QUALITY_COLORS = {
   Excellent: "#3fb950",
   Good: "#58a6ff",
@@ -40,7 +42,14 @@ export default function MediaInfoReport({ reports }) {
                 {v.profile ? ` (${v.profile})` : ""}
               </h4>
               <div className="mediainfo__grid">
-                <Row label="Resolution" value={v.width && v.height ? `${v.width}x${v.height}` : "unknown"} />
+                <Row
+                  label="Resolution"
+                  value={
+                    v.width && v.height
+                      ? `${v.width}x${v.height} · ${resolutionClass(v.width, v.height)}`
+                      : "unknown"
+                  }
+                />
                 <Row label="Frame rate" value={v.fps ? `${v.fps} fps` : "unknown"} />
                 <Row
                   label="Bitrate"
