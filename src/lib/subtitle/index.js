@@ -14,7 +14,8 @@ import { parseVobsub } from "./vobsub";
 import { ocrFramesToCues } from "./ocr";
 import { cuesToPinyin } from "./pinyin";
 import { detectSubtitleLanguage } from "./langDetect";
-import { compressAudio } from "../ffmpegEngine";
+import { compressAudio, readMediaLog } from "../ffmpegEngine";
+import { parseMediaInfo, reportToText } from "../mediaInfo";
 import JSZip from "jszip";
 import { languageName } from "../languages";
 
@@ -553,6 +554,25 @@ export const TOOLS = {
       const audioTrack = options.audioTrack === "all" ? "all" : Number(options.audioTrack) || 0;
       const { blob, extension } = await compressAudio({ file, format, quality, audioTrack, onProgress });
       return download(`${baseName(file.name)}.compressed.${extension}`, blob, blob.type);
+    },
+  },
+  "video-info": {
+    label: "Video Info",
+    category: "other",
+    accept: ".mp4,.mkv,.mov,.avi,.webm,.m4v,.wmv,.flv,.ts,.mpg,.mpeg,.3gp,.mka,.mp3,.m4a,.aac,.wav,.flac,.ogg,.opus,.wma",
+    fields: [],
+    showPercent: false,
+    progressLabel: "Reading",
+    hint: "Shows each file's length, size, frame rate, resolution, bitrate and a quality rating. Only the file header is read, so it is quick and nothing is re-encoded.",
+    async run(files, options, onProgress) {
+      const reports = [];
+      for (let i = 0; i < files.length; i++) {
+        const log = await readMediaLog(files[i]);
+        reports.push(parseMediaInfo(log, files[i].size, files[i].name));
+        if (onProgress) onProgress((i + 1) / files.length);
+      }
+      const name = files.length === 1 ? `${baseName(files[0].name)}.media-info.txt` : "media-info.txt";
+      return { ...download(name, reportToText(reports), "text/plain"), report: reports };
     },
   },
 };

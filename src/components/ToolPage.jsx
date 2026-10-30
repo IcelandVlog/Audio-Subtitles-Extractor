@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { TOOLS, CATEGORY_LABELS } from "../lib/subtitle";
 import SupInspectModal from "./SupInspectModal";
+import MediaInfoReport from "./MediaInfoReport";
 
 export default function ToolPage({ toolId, onHome }) {
   const tool = TOOLS[toolId];
@@ -288,6 +289,7 @@ export default function ToolPage({ toolId, onHome }) {
         {status === "done" && result && (
           <>
             {result.note && <p className="tool-page__hint">{result.note}</p>}
+            {result.report && <MediaInfoReport reports={result.report} />}
             <div className="tool-modal__result">
               <span>Done — {result.filename}</span>
               <button type="button" className="tool-modal__download" onClick={handleDownload}>

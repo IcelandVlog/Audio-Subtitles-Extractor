@@ -923,3 +923,39 @@ export async function cleanupInput(inputName) {
     // already gone, ignore
   }
 }
+
+/**
+ * Read a media file's header info by running `ffmpeg -i <file>` with no
+ * output. Nothing is encoded, so this is quick even for large files. Returns
+ * the raw log text (ffmpeg prints the stream/duration report to stderr), which
+ * mediaInfo.js turns into a structured report.
+ */
+export function readMediaLog(file) {
+  return runExclusive(async () => {
+    const ffmpeg = await loadEngine();
+
+    let inputName;
+    if (file.size <= MEMFS_SAFE_BYTES) {
+      inputName = safeName(file.name) || `input_${Date.now()}`;
+      const data = await readFileWithProgress(file);
+      await ffmpeg.writeFile(inputName, data);
+    } else {
+      inputName = await mountInputFile(ffmpeg, file);
+    }
+
+    let log = "";
+    const collector = ({ message }) => {
+      log += message + "\n";
+    };
+    ffmpeg.on("log", collector);
+    try {
+      // With no output file ffmpeg exits non-zero by design; the report is
+      // in the log, so the exit code is ignored here.
+      await ffmpeg.exec(["-i", inputName]);
+    } finally {
+      ffmpeg.off("log", collector);
+      await cleanupInput(inputName);
+    }
+    return log;
+  });
+}
