@@ -127,12 +127,13 @@ export default function MediaInfoReport({ reports }) {
             type="button"
             className="mediainfo__toggle"
             aria-expanded={isOpen(i)}
+            aria-label={isOpen(i) ? "Close file details" : "Open file details"}
             onClick={() => toggle(i)}
           >
             <span className="mediainfo__title" title={r.fileName}>
               {i + 1}. {r.fileName}
             </span>
-            <span className="mediainfo__chev">{isOpen(i) ? "Close ▲" : "Open ▼"}</span>
+            <span className="mediainfo__chev" aria-hidden="true">{isOpen(i) ? "▲" : "▼"}</span>
           </button>
           {isOpen(i) && (
           <>
