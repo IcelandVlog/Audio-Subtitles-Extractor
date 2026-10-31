@@ -2083,3 +2083,12 @@
   .dropzone__title { font-size: 1.3em; }
   .dropzone__sub { font-size: 1.05em; }
 }
+
+/* Large screens: slightly smaller hero text, bigger visualizer animation. */
+@media (min-width: 1000px) {
+  .hero__title { font-size: clamp(2.8rem, 3.4vw + 1rem, 4.6rem); }
+  .hero__sub { font-size: 17px; max-width: 680px; }
+  /* wider, not taller: the bars spread across more width */
+  .meter { zoom: 1; max-width: 920px; gap: 4px; }
+  .meter__bar { max-width: none; }
+}
