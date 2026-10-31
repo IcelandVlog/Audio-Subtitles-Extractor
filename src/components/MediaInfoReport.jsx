@@ -130,10 +130,24 @@ export default function MediaInfoReport({ reports }) {
             aria-label={isOpen(i) ? "Close file details" : "Open file details"}
             onClick={() => toggle(i)}
           >
-            <span className="mediainfo__title" title={r.fileName}>
-              {i + 1}. {r.fileName}
-            </span>
-            <span className="mediainfo__chev" aria-hidden="true">{isOpen(i) ? "▲" : "▼"}</span>
+            <div className="track__index" aria-hidden="true">
+              {String(i + 1).padStart(2, "0")}
+            </div>
+            <div className="track__info">
+              <p className="track__name" title={r.fileName}>
+                {r.fileName}
+              </p>
+              <p className="track__sub">
+                {r.durationText} <span className="dot">·</span> {r.sizeText}
+                {r.video[0] && r.video[0].width && r.video[0].height ? (
+                  <>
+                    <span className="dot">·</span>
+                    {r.video[0].width}x{r.video[0].height}
+                  </>
+                ) : null}
+              </p>
+            </div>
+            <span className={`track__chevron ${isOpen(i) ? "" : "track__chevron--collapsed"}`} aria-hidden="true">▼</span>
           </button>
           {isOpen(i) && (
           <>

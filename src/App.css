@@ -2138,3 +2138,15 @@
 .mediainfo__toggle .mediainfo__title { margin: 0; }
 .mediainfo__chev { flex-shrink: 0; font-size: 0.8em; opacity: 0.7; }
 .mediainfo__toggle:hover .mediainfo__chev { opacity: 1; }
+
+/* Video Info cards: same look as the extractor track rows — numbered in green,
+   one-line name that ellipses, a details line under it, arrow at the right. */
+.mediainfo .mediainfo__card { border-color: var(--border-soft, rgba(127,127,127,0.25)); border-radius: var(--radius-md, 10px); }
+.mediainfo__toggle { align-items: flex-start; gap: 14px; padding: 0 0 6px; }
+.mediainfo__toggle .track__index { color: var(--phosphor, #6fffa6); padding-top: 2px; flex-shrink: 0; font-family: var(--font-mono); font-size: 12px; }
+.mediainfo__toggle .track__info { flex: 1; min-width: 0; }
+.mediainfo__toggle .track__name { margin: 0 0 4px; font-weight: 500; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mediainfo__toggle .track__sub { margin: 0; font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
+.mediainfo__toggle .track__sub .dot { margin: 0 6px; color: var(--text-faint); }
+.mediainfo__toggle .track__chevron { margin-top: 4px; }
+.mediainfo__toggle:hover .track__chevron { color: var(--phosphor, #6fffa6); }
