@@ -2099,3 +2099,36 @@
   .meter__bar { max-width: 16px; }
   .meter__bar:nth-child(n + 21) { display: none; }
 }
+
+/* Scrollbars: thin, theme-coloured thumb, no boxed track — on every page and
+   inside every scrolling card or list. Firefox uses the standard properties;
+   Chromium/Safari use the -webkit- ones. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--phosphor-dim, #3f8f63) transparent;
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--phosphor-dim, #3f8f63);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--phosphor, #6ee7a0);
+  background-clip: content-box;
+}
+::-webkit-scrollbar-button {
+  display: none;
+  height: 0;
+  width: 0;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
