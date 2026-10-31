@@ -2092,3 +2092,10 @@
   .meter { zoom: 1; max-width: 820px; gap: 8px; }
   .meter__bar { max-width: 10px; }
 }
+
+/* Small screens: fewer, wider bars so the visualizer reads clearly. */
+@media (max-width: 640px) {
+  .meter { gap: 6px; max-width: 100%; }
+  .meter__bar { max-width: 16px; }
+  .meter__bar:nth-child(n + 21) { display: none; }
+}
