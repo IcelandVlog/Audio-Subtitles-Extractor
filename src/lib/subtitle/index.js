@@ -573,9 +573,23 @@ export const TOOLS = {
       const reports = [];
       for (let i = 0; i < files.length; i++) {
         if (onProgress) onProgress(i / files.length, { index: i, fraction: 0 });
-        const log = await readMediaLog(files[i], (f) => {
+        // ffmpeg does not report progress while it reads a header, so the
+        // per-file percentage is an estimate that climbs smoothly (1, 2, 3...%)
+        // and jumps to done when the file finishes.
+        const started = Date.now();
+        const tick = () => {
+          const secs = (Date.now() - started) / 1000;
+          const f = Math.min(0.95, 1 - Math.exp(-secs / 1.5));
           if (onProgress) onProgress((i + f) / files.length, { index: i, fraction: f });
-        });
+        };
+        tick();
+        const timer = setInterval(tick, 60);
+        let log;
+        try {
+          log = await readMediaLog(files[i]);
+        } finally {
+          clearInterval(timer);
+        }
         const languageByIndex = await readMkvLanguages(files[i]);
         reports.push(parseMediaInfo(log, files[i].size, files[i].name, { languageByIndex }));
         if (onProgress) onProgress((i + 1) / files.length, { index: i, fraction: 1 });

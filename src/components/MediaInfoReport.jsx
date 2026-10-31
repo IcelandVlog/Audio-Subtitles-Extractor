@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { resolutionClass } from "../lib/mediaInfo";
 
 const QUALITY_COLORS = {
@@ -57,6 +58,7 @@ function ComparisonCard({ reports }) {
         <table className="mediainfo__table">
           <thead>
             <tr>
+              <th>#</th>
               <th>File</th>
               <th>Length</th>
               <th>Size</th>
@@ -73,6 +75,7 @@ function ComparisonCard({ reports }) {
               const v = v0(r);
               return (
                 <tr key={`s-${r.fileName}-${i}`}>
+                  <td>{i + 1}</td>
                   <td className="mediainfo__name" title={r.fileName}>{r.fileName}</td>
                   <td className={hl(i, "length")}>{r.durationText}</td>
                   <td className={hl(i, "size")}>{r.sizeText}</td>
@@ -109,15 +112,30 @@ function ComparisonCard({ reports }) {
 // Shows, per file: length, size, container, and for each video stream its
 // resolution, frame rate, bitrate and a quality rating; plus audio and subtitle tracks.
 export default function MediaInfoReport({ reports }) {
+  // Each file card can be opened or closed; all start open.
+  const [closed, setClosed] = useState({});
+  const isOpen = (i) => !closed[i];
+  const toggle = (i) => setClosed((prev) => ({ ...prev, [i]: !prev[i] }));
+
   return (
     <div className="mediainfo">
       {reports.length > 1 && <ComparisonCard reports={reports} />}
 
       {reports.map((r, i) => (
         <section className="mediainfo__card" key={`${r.fileName}-${i}`}>
-          <h3 className="mediainfo__title" title={r.fileName}>
-            {r.fileName}
-          </h3>
+          <button
+            type="button"
+            className="mediainfo__toggle"
+            aria-expanded={isOpen(i)}
+            onClick={() => toggle(i)}
+          >
+            <span className="mediainfo__title" title={r.fileName}>
+              {i + 1}. {r.fileName}
+            </span>
+            <span className="mediainfo__chev">{isOpen(i) ? "Close ▲" : "Open ▼"}</span>
+          </button>
+          {isOpen(i) && (
+          <>
           <div className="mediainfo__grid">
             <Row label="Length" value={r.durationText} />
             <Row label="File size" value={r.sizeText} />
@@ -198,6 +216,8 @@ export default function MediaInfoReport({ reports }) {
             </div>
           )}
           </div>
+          </>
+          )}
         </section>
       ))}
     </div>

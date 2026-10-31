@@ -2132,3 +2132,9 @@
 ::-webkit-scrollbar-corner {
   background: transparent;
 }
+
+/* Video Info: open/close button on each file card */
+.mediainfo__toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; background: none; border: 0; padding: 0 0 8px; margin: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.mediainfo__toggle .mediainfo__title { margin: 0; }
+.mediainfo__chev { flex-shrink: 0; font-size: 0.8em; opacity: 0.7; }
+.mediainfo__toggle:hover .mediainfo__chev { opacity: 1; }
