@@ -573,7 +573,9 @@ export const TOOLS = {
       const reports = [];
       for (let i = 0; i < files.length; i++) {
         if (onProgress) onProgress(i / files.length, { index: i, fraction: 0 });
-        const log = await readMediaLog(files[i]);
+        const log = await readMediaLog(files[i], (f) => {
+          if (onProgress) onProgress((i + f) / files.length, { index: i, fraction: f });
+        });
         const languageByIndex = await readMkvLanguages(files[i]);
         reports.push(parseMediaInfo(log, files[i].size, files[i].name, { languageByIndex }));
         if (onProgress) onProgress((i + 1) / files.length, { index: i, fraction: 1 });

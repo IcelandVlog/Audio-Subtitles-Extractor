@@ -930,13 +930,15 @@ export async function cleanupInput(inputName) {
  * the raw log text (ffmpeg prints the stream/duration report to stderr), which
  * mediaInfo.js turns into a structured report.
  */
-export function readMediaLog(file) {
+export function readMediaLog(file, onStep) {
   return runExclusive(async () => {
     const ffmpeg = await loadEngine();
 
     // Mount the file (WORKERFS) instead of copying it into memory: ffmpeg
     // only needs the header, so a multi-GB file is ready immediately.
     const inputName = await mountInputFile(ffmpeg, file);
+    // The file is mounted: halfway through this file's work.
+    if (onStep) onStep(0.5);
 
     let log = "";
     const collector = ({ message }) => {
