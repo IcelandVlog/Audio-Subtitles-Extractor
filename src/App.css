@@ -2150,3 +2150,6 @@
 .mediainfo__toggle .track__sub .dot { margin: 0 6px; color: var(--text-faint); }
 .mediainfo__toggle .track__chevron { margin-top: 4px; }
 .mediainfo__toggle:hover .track__chevron { color: var(--phosphor, #6fffa6); }
+
+/* Video Info cards: same panel background as the track rows. */
+.mediainfo .mediainfo__card { background: var(--surface); }
