@@ -311,7 +311,8 @@ export function reportToText(reports) {
       if (v.quality) lines.push(`  Quality: ${v.quality.label} - ${v.quality.note}`);
       if (v.hdr) lines.push("  HDR: yes");
     });
-    lines.push(`Audio tracks: ${r.audio.length}`);
+    const dash = "-".repeat(60);
+    lines.push(dash, `Audio tracks: (${r.audio.length})`, dash);
     r.audio.forEach((a, i) => {
       lines.push(
         `Audio ${i + 1}: ${a.codec} - ${a.languageText}` +
@@ -319,7 +320,7 @@ export function reportToText(reports) {
           `${a.bitrateKbps ? `, ${a.bitrateKbps} kb/s` : ""}`
       );
     });
-    lines.push(`Subtitle tracks: ${r.subtitleTracks.length}`);
+    lines.push(dash, `Subtitle tracks: (${r.subtitleTracks.length})`, dash);
     r.subtitleTracks.forEach((s, i) => {
       lines.push(`Subtitle ${i + 1}: ${s.codec} - ${s.languageText}${s.flags.length ? ` (${s.flags.join(", ")})` : ""}`);
     });
