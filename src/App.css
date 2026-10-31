@@ -2090,5 +2090,5 @@
   .hero__sub { font-size: 17px; max-width: 680px; }
   /* wider, not taller: the bars spread across more width */
   .meter { zoom: 1; max-width: 920px; gap: 4px; }
-  .meter__bar { max-width: none; }
+  .meter__bar { max-width: 22px; }
 }
