@@ -2057,3 +2057,14 @@
   .mediainfo__card { padding: 12px; max-height: 80vh; }
   .mediainfo__name { max-width: 120px; }
 }
+
+/* Large screens: give every page more room. The page width grows with the
+   screen (up to a cap) instead of staying at the phone-sized column. */
+@media (min-width: 1000px) {
+  .shell { max-width: min(1400px, 92vw); }
+  .tool-page { max-width: min(960px, 100%); }
+}
+@media (min-width: 1600px) {
+  .shell { max-width: min(1600px, 88vw); }
+  .tool-page { max-width: min(1100px, 100%); }
+}
