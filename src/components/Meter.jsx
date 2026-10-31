@@ -1,4 +1,4 @@
-const BAR_COUNT = 33;
+const BAR_COUNT = 28;
 
 // Deterministic pseudo-random per-bar timing so the meter feels alive but never chaotic.
 const bars = Array.from({ length: BAR_COUNT }, (_, i) => {

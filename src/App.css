@@ -2089,6 +2089,6 @@
   .hero__title { font-size: clamp(2.8rem, 3.4vw + 1rem, 4.6rem); }
   .hero__sub { font-size: 17px; max-width: 680px; }
   /* wider, not taller: the bars spread across more width */
-  .meter { zoom: 1; max-width: 920px; gap: 4px; }
-  .meter__bar { max-width: 22px; }
+  .meter { zoom: 1; max-width: 820px; gap: 8px; }
+  .meter__bar { max-width: 10px; }
 }
