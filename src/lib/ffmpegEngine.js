@@ -234,7 +234,9 @@ function releasePrefetchSlot() {
  * fails the same way immediately after.
  */
 export function prefetchFileBytes(file, onProgress) {
-  if (file.size > MEMFS_SAFE_BYTES) return null;
+  // No longer prefetched: probeFile mounts the file and reads only its headers,
+  // so holding every file's bytes in memory ahead of time is not needed.
+  if (file) return null;
   return acquirePrefetchSlot().then(async () => {
     try {
       try {
@@ -297,31 +299,18 @@ const NOT_READABLE_HINT =
 export function probeFile(file, { onProgress, onUploaded, prefetch } = {}) {
   return runExclusive(async () => {
     const ffmpeg = await loadEngine();
+    // Mount the file (WORKERFS) instead of copying it into memory. A probe only
+    // needs the stream headers, and copying every large file in a batch into
+    // the wasm heap (and keeping the copies) is what exhausted memory and made
+    // the browser lose access to files waiting in the queue.
     let inputName;
-    if (file.size <= MEMFS_SAFE_BYTES) {
-      // Fast path: whole file fits comfortably in the wasm heap, so a plain
-      // in-memory copy — no per-chunk read overhead — is quickest. Prefer
-      // bytes already captured by prefetchFileBytes (started the moment the
-      // file was added) over touching the File object again now, since by
-      // the time this runs the File may be several other-files'-worth of
-      // processing time removed from when it was first acquired.
-      inputName = safeName(file.name);
-      let data;
-      try {
-        data = prefetch ? await prefetch : await readFileWithProgress(file, onProgress);
-      } catch (err) {
-        if (/could not be read/i.test(err?.message || "")) {
-          throw new Error(NOT_READABLE_HINT);
-        }
-        throw err;
-      }
-      onProgress?.(1);
-      await ffmpeg.writeFile(inputName, data);
-    } else {
-      // Fallback for files too big to fit in memory at all.
+    try {
       inputName = await mountInputFile(ffmpeg, file);
-      onProgress?.(1);
+    } catch (err) {
+      if (/could not be read/i.test(err?.message || "")) throw new Error(NOT_READABLE_HINT);
+      throw err;
     }
+    onProgress?.(1);
     onUploaded?.();
 
     let log = "";
@@ -338,6 +327,9 @@ export function probeFile(file, { onProgress, onUploaded, prefetch } = {}) {
     }
 
     const info = parseProbeLog(log);
+    if (info.streams.length === 0 && /Error opening input|Permission denied|Input\/output error|No such file/i.test(log)) {
+      throw new Error(`Couldn't open this file: ${tailOfLog(log)}`);
+    }
     return { inputName, ...info };
   });
 }
