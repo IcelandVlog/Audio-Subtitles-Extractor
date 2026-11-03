@@ -25,10 +25,10 @@ export function downloadResultFiles(result, baseName) {
 }
 
 /** Add a result (plus companions) to a zip, keeping companions' names in step with the main file's. */
-export function addResultToZip(zip, fullName, result) {
-  zip.file(fullName, result.blob);
+export async function addResultToZip(zip, fullName, result) {
+  await zip.add(fullName, result.blob);
   const stem = fullName.replace(/\.[^./]+$/, "");
-  for (const c of result.companions || []) zip.file(`${stem}.${c.extension}`, c.blob);
+  for (const c of result.companions || []) await zip.add(`${stem}.${c.extension}`, c.blob);
 }
 
 export function stripExt(name) {

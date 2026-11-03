@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import JSZip from "jszip";
+import { StoredZip } from "./storedZip";
 import {
   probeFile,
   prefetchFileBytes,
@@ -616,7 +616,7 @@ export function useTrackQueue() {
       patchTrack(trackId, { [statusKey]: "extracting", [progressKey]: 0 });
 
       const base = stripExt(track.name);
-      const zip = new JSZip();
+      const zip = new StoredZip();
       const perStreamProgress = new Array(list.length).fill(0);
       const usedNames = new Set();
 
@@ -669,7 +669,9 @@ export function useTrackQueue() {
                     patchStream(trackId, kind, stream.index, { progress: p * 0.6 });
                   },
                 });
-                patchStream(trackId, kind, stream.index, { native });
+                // Not cached on the stream here: in "extract all" the native copy is
+                // only needed for this one conversion, and keeping it in state held a
+                // second full-size copy of every track until the file was removed.
               }
               const blob = formatMatchesCodec(stream.format, native.codec)
                 ? native.blob
@@ -685,7 +687,7 @@ export function useTrackQueue() {
                       patchStream(trackId, kind, stream.index, { progress: overall });
                     },
                   });
-              zip.file(uniqueName(`${base}${langTag}.${stream.format}`), blob);
+              await zip.add(uniqueName(`${base}${langTag}.${stream.format}`), blob);
               patchStream(trackId, kind, stream.index, {
                 status: "done",
                 progress: 1,
@@ -703,7 +705,7 @@ export function useTrackQueue() {
                   patchStream(trackId, kind, stream.index, { progress: p });
                 },
               });
-              addResultToZip(zip, uniqueName(`${base}${langTag}.${extension}`), { blob, extension, companions });
+              await addResultToZip(zip, uniqueName(`${base}${langTag}.${extension}`), { blob, extension, companions });
               patchStream(trackId, kind, stream.index, {
                 status: "done",
                 progress: 1,
@@ -720,7 +722,7 @@ export function useTrackQueue() {
         }
 
         // STORE: these are already-encoded audio/subtitle blobs, so skip DEFLATE.
-        const zipBlob = await zip.generateAsync({ type: "blob", compression: "STORE" });
+        const zipBlob = zip.toBlob();
         const resultKey = kind === "audio" ? "audioAllResult" : "subsAllResult";
         patchTrack(trackId, { [statusKey]: "done", [progressKey]: 1, [resultKey]: zipBlob });
       } catch (err) {
@@ -766,7 +768,7 @@ export function useTrackQueue() {
       setProgress(0);
       setResult(null);
 
-      const zip = new JSZip();
+      const zip = new StoredZip();
       const usedNames = new Set();
 
       // Every file's tracks share one flat zip, so prefix each entry with
@@ -788,14 +790,15 @@ export function useTrackQueue() {
       };
 
       try {
-        extractedEntries.forEach(({ track, stream }, i) => {
+        for (let i = 0; i < extractedEntries.length; i++) {
+          const { track, stream } = extractedEntries[i];
           const base = stripExt(track.name);
           const langTag = stream.language && stream.language !== "und" ? `.${stream.language}` : "";
-          addResultToZip(zip, uniqueName(`${base}${langTag}.${stream.result.extension}`), stream.result);
+          await addResultToZip(zip, uniqueName(`${base}${langTag}.${stream.result.extension}`), stream.result);
           setProgress((i + 1) / extractedEntries.length);
-        });
+        }
 
-        const zipBlob = await zip.generateAsync({ type: "blob", compression: "STORE" });
+        const zipBlob = zip.toBlob();
         setStatus("done");
         setProgress(1);
         setResult(zipBlob);
@@ -862,7 +865,7 @@ export function useTrackQueue() {
       setProgress(0);
       setResult(null);
 
-      const zip = new JSZip();
+      const zip = new StoredZip();
       const usedNames = new Set();
       const uniqueName = (name) => {
         if (!usedNames.has(name)) {
@@ -914,11 +917,11 @@ export function useTrackQueue() {
 
           const base = stripExt(track.name);
           const langTag = stream.language && stream.language !== "und" ? `.${stream.language}` : "";
-          addResultToZip(zip, uniqueName(`${base}${langTag}.${extension}`), { blob, extension, companions });
+          await addResultToZip(zip, uniqueName(`${base}${langTag}.${extension}`), { blob, extension, companions });
           setProgress((i + 1) / entries.length);
         }
 
-        const zipBlob = await zip.generateAsync({ type: "blob", compression: "STORE" });
+        const zipBlob = zip.toBlob();
         setStatus("done");
         setProgress(1);
         setResult(zipBlob);

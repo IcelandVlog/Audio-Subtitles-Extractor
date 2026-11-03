@@ -567,7 +567,9 @@ export const TOOLS = {
     actionLabel: "Check",
     multiFile: true,
     minFiles: 1,
-    maxFiles: 30,
+    // No practical cap: each file is read one at a time and only its header is
+    // touched, so the number of videos is not limited.
+    maxFiles: 100000,
     hint: "Shows each file's length, size, frame rate, resolution, bitrate and a quality rating. Only the file header is read, so it is quick and nothing is re-encoded.",
     async run(files, options, onProgress) {
       const reports = [];

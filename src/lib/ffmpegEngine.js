@@ -483,24 +483,28 @@ export function extractAudioSample({ inputName, streamIndex, codec, seconds = 45
 export function convertAudioFromNative({ nativeBlob, nativeExtension, streamIndex, format, onProgress }) {
   return runExclusive(async () => {
     const ffmpeg = await loadEngine();
-    const inputName = `native_in_${streamIndex}.${nativeExtension}`;
     const outputName = `converted_${streamIndex}.${format}`;
     const encoderArgs = AUDIO_ENCODERS[format] || AUDIO_ENCODERS.mp3;
 
-    const data = new Uint8Array(await nativeBlob.arrayBuffer());
-    await ffmpeg.writeFile(inputName, data);
+    // Mount the native blob instead of copying it into the wasm heap: the
+    // extracted track is no longer duplicated in JS memory and in MEMFS.
+    // The ffmpeg arguments are unchanged, so speed is the same.
+    const inputPath = await mountInputFile(
+      ffmpeg,
+      new File([nativeBlob], `native_in_${streamIndex}.${nativeExtension}`)
+    );
 
     const progressHandler = ({ progress }) => {
       if (onProgress && Number.isFinite(progress)) onProgress(Math.min(Math.max(progress, 0), 1));
     };
     ffmpeg.on("progress", progressHandler);
     try {
-      await execCapturingLog(ffmpeg, ["-i", inputName, ...encoderArgs, outputName]);
+      await execCapturingLog(ffmpeg, ["-i", inputPath, ...encoderArgs, outputName]);
       const outData = await ffmpeg.readFile(outputName);
       return new Blob([outData.buffer], { type: `audio/${format}` });
     } finally {
       ffmpeg.off("progress", progressHandler);
-      await ffmpeg.deleteFile(inputName).catch(() => {});
+      await cleanupInput(inputPath);
       await ffmpeg.deleteFile(outputName).catch(() => {});
     }
   });
