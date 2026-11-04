@@ -189,7 +189,7 @@ async function mountInputFile(ffmpeg, file) {
  * copied once into the wasm heap and reused. Bigger files, or a copy that fails
  * because the browser dropped access to a long-queued File, keep the mount.
  */
-async function fastInput(ffmpeg, inputName) {
+async function fastInput(ffmpeg, inputName, onProgress) {
   if (!inputName.includes("/")) return inputName; // already in memory
   if (stagedInput?.source === inputName) return stagedInput.path;
   const file = mountedFiles.get(inputName);
@@ -201,7 +201,7 @@ async function fastInput(ffmpeg, inputName) {
   }
   const path = `staged_${++stageCounter}_${safeName(file.name)}`;
   try {
-    const data = await readFileWithProgress(file);
+    const data = await readFileWithProgress(file, onProgress);
     await ffmpeg.writeFile(path, data);
   } catch {
     await ffmpeg.deleteFile(path).catch(() => {});
@@ -348,6 +348,10 @@ export function probeFile(file, { onProgress, onUploaded, prefetch } = {}) {
       if (/could not be read/i.test(err?.message || "")) throw new Error(NOT_READABLE_HINT);
       throw err;
     }
+    // Copy the file into memory first (with real byte progress), so ffmpeg
+    // reads the headers from memory instead of through the slow mount. Large
+    // files keep the mount.
+    const probePath = await fastInput(ffmpeg, inputName, (p) => onProgress?.(p));
     onProgress?.(1);
     onUploaded?.();
 
@@ -357,7 +361,7 @@ export function probeFile(file, { onProgress, onUploaded, prefetch } = {}) {
     };
     ffmpeg.on("log", collector);
     try {
-      await ffmpeg.exec(["-i", inputName]);
+      await ffmpeg.exec(["-i", probePath]);
     } catch {
       // expected: ffmpeg exits non-zero when no output is requested
     } finally {
