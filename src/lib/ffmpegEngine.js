@@ -164,13 +164,51 @@ function safeName(name) {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
+// Mount path -> File, so an extraction can later copy the file into memory.
+const mountedFiles = new Map();
+// One in-memory copy of the current source file, reused by every extraction
+// on that file (e.g. each stream of "extract all"). Only one is kept, so the
+// memory cost is bounded to a single file.
+let stagedInput = null; // { source, path }
+let stageCounter = 0;
+
 async function mountInputFile(ffmpeg, file) {
   const mountPoint = `/in_${++mountCounter}`;
   await ffmpeg.createDir(mountPoint);
   await ffmpeg.mount("WORKERFS", { files: [file] }, mountPoint);
   // WORKERFS exposes the file under its own original name inside the mount —
   // it can't be renamed, so the ffmpeg input path has to match it exactly.
-  return `${mountPoint}/${file.name}`;
+  const path = `${mountPoint}/${file.name}`;
+  mountedFiles.set(path, file);
+  return path;
+}
+
+/**
+ * Return the path an extraction should read from. WORKERFS mounts are slow to
+ * demux (every read crosses into the worker), so a file that fits in memory is
+ * copied once into the wasm heap and reused. Bigger files, or a copy that fails
+ * because the browser dropped access to a long-queued File, keep the mount.
+ */
+async function fastInput(ffmpeg, inputName) {
+  if (!inputName.includes("/")) return inputName; // already in memory
+  if (stagedInput?.source === inputName) return stagedInput.path;
+  const file = mountedFiles.get(inputName);
+  if (!file || file.size > MEMFS_SAFE_BYTES) return inputName;
+
+  if (stagedInput) {
+    await ffmpeg.deleteFile(stagedInput.path).catch(() => {});
+    stagedInput = null;
+  }
+  const path = `staged_${++stageCounter}_${safeName(file.name)}`;
+  try {
+    const data = await readFileWithProgress(file);
+    await ffmpeg.writeFile(path, data);
+  } catch {
+    await ffmpeg.deleteFile(path).catch(() => {});
+    return inputName;
+  }
+  stagedInput = { source: inputName, path };
+  return path;
 }
 
 /** Read a File into memory while reporting real byte-level progress (0..1). */
@@ -401,9 +439,10 @@ export function defaultFormatForCodec(codec) {
  * long videos. The result is cached by the caller and reused as the source
  * for any later format conversion, instead of re-reading the whole video.
  */
-export function extractAudioNative({ inputName, streamIndex, codec, onProgress }) {
+export function extractAudioNative({ inputName: rawInput, streamIndex, codec, onProgress }) {
   return runExclusive(async () => {
     const ffmpeg = await loadEngine();
+    const inputName = await fastInput(ffmpeg, rawInput);
     const extension = nativeContainerFor(codec);
     const outputName = `native_${streamIndex}.${extension}`;
 
@@ -444,9 +483,10 @@ export function extractAudioNative({ inputName, streamIndex, codec, onProgress }
  * running language-ID on that instead of actual dialogue is a common way to
  * get the wrong language back.
  */
-export function extractAudioSample({ inputName, streamIndex, codec, seconds = 45, startSeconds = 0 }) {
+export function extractAudioSample({ inputName: rawInput, streamIndex, codec, seconds = 45, startSeconds = 0 }) {
   return runExclusive(async () => {
     const ffmpeg = await loadEngine();
+    const inputName = await fastInput(ffmpeg, rawInput);
     const extension = nativeContainerFor(codec);
     const outputName = `sample_${streamIndex}.${extension}`;
 
@@ -486,13 +526,16 @@ export function convertAudioFromNative({ nativeBlob, nativeExtension, streamInde
     const outputName = `converted_${streamIndex}.${format}`;
     const encoderArgs = AUDIO_ENCODERS[format] || AUDIO_ENCODERS.mp3;
 
-    // Mount the native blob instead of copying it into the wasm heap: the
-    // extracted track is no longer duplicated in JS memory and in MEMFS.
-    // The ffmpeg arguments are unchanged, so speed is the same.
-    const inputPath = await mountInputFile(
-      ffmpeg,
-      new File([nativeBlob], `native_in_${streamIndex}.${nativeExtension}`)
-    );
+    // Small tracks are copied into memory (fast demux). Very large ones stay
+    // on a zero-copy mount so they don't need a second full copy in the heap.
+    const nativeName = `native_in_${streamIndex}.${nativeExtension}`;
+    let inputPath;
+    if (nativeBlob.size <= MEMFS_SAFE_BYTES) {
+      inputPath = nativeName;
+      await ffmpeg.writeFile(inputPath, new Uint8Array(await nativeBlob.arrayBuffer()));
+    } else {
+      inputPath = await mountInputFile(ffmpeg, new File([nativeBlob], nativeName));
+    }
 
     const progressHandler = ({ progress }) => {
       if (onProgress && Number.isFinite(progress)) onProgress(Math.min(Math.max(progress, 0), 1));
@@ -518,9 +561,10 @@ export function convertAudioFromNative({ nativeBlob, nativeExtension, streamInde
  * every requested stream in a single command reads the source exactly once
  * no matter how many tracks come out of it.
  */
-export function extractAudioNativeBatch({ inputName, streams, onProgress }) {
+export function extractAudioNativeBatch({ inputName: rawInput, streams, onProgress }) {
   return runExclusive(async () => {
     const ffmpeg = await loadEngine();
+    const inputName = await fastInput(ffmpeg, rawInput);
     const outputs = streams.map((s) => {
       const extension = nativeContainerFor(s.codec);
       return { ...s, extension, outputName: `native_${s.streamIndex}.${extension}` };
@@ -559,9 +603,10 @@ export function extractAudioNativeBatch({ inputName, streams, onProgress }) {
  * single-stream version — no try/convert/catch-and-fallback per stream is
  * needed; streams are routed to the right group up front.
  */
-export function extractSubtitleBatch({ inputName, streams, onProgress }) {
+export function extractSubtitleBatch({ inputName: rawInput, streams, onProgress }) {
   return runExclusive(async () => {
     const ffmpeg = await loadEngine();
+    const inputName = await fastInput(ffmpeg, rawInput);
     const assStreams = streams.filter((s) => isAssCodec(s.codec));
     const textStreams = streams.filter((s) => SUBTITLE_TEXT_CODECS.has(s.codec) && !isAssCodec(s.codec));
     const vobsubStreams = streams.filter((s) => isVobsubCodec(s.codec));
@@ -659,9 +704,10 @@ export function extractSubtitleBatch({ inputName, streams, onProgress }) {
 }
 
 /** Extract a single audio stream (by absolute ffmpeg stream index) to the requested format. */
-export function extractAudio({ inputName, streamIndex, format, onProgress }) {
+export function extractAudio({ inputName: rawInput, streamIndex, format, onProgress }) {
   return runExclusive(async () => {
     const ffmpeg = await loadEngine();
+    const inputName = await fastInput(ffmpeg, rawInput);
     const outputName = `out_${streamIndex}.${format}`;
     const encoderArgs = AUDIO_ENCODERS[format] || AUDIO_ENCODERS.mp3;
     const mapArgs = Number.isFinite(streamIndex) ? ["-map", `0:${streamIndex}`] : [];
@@ -838,9 +884,10 @@ async function extractVobsubPair(ffmpeg, { inputName, streamIndex, language }) {
  * as a .sub + .idx pair (the .idx is returned in `companions`); other bitmap codecs
  * fall back to their native container.
  */
-export function extractSubtitle({ inputName, streamIndex, codec, language, onProgress }) {
+export function extractSubtitle({ inputName: rawInput, streamIndex, codec, language, onProgress }) {
   return runExclusive(async () => {
     const ffmpeg = await loadEngine();
+    const inputName = await fastInput(ffmpeg, rawInput);
     const isText = SUBTITLE_TEXT_CODECS.has(codec);
 
     const progressHandler = ({ progress }) => {
@@ -896,6 +943,11 @@ export function extractSubtitle({ inputName, streamIndex, codec, language, onPro
 
 export async function cleanupInput(inputName) {
   if (!ffmpegInstance) return;
+  if (stagedInput?.source === inputName) {
+    await ffmpegInstance.deleteFile(stagedInput.path).catch(() => {});
+    stagedInput = null;
+  }
+  mountedFiles.delete(inputName);
   // MEMFS path: a plain filename with no "/" (see safeName). WORKERFS path:
   // "<mountPoint>/<original file name>" (see mountInputFile) — for that one,
   // unmount and remove the mount directory instead of deleting a file.
