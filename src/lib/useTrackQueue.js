@@ -8,6 +8,7 @@ import {
   cleanupInput,
   loadEngine,
   extractAudioNative,
+  extractAudioNativeBatch,
   extractAudioSample,
   convertAudioFromNative,
   formatMatchesCodec,
@@ -642,6 +643,35 @@ export function useTrackQueue() {
       };
 
       try {
+        // Audio: pull the native copies of all tracks in one ffmpeg pass per
+        // group, so the file is demuxed once instead of once per track. Groups
+        // are capped so the outputs don't all sit in memory together. If a group
+        // fails, its tracks fall back to the per-track path below.
+        const batchNative = {};
+        if (kind === "audio") {
+          const pending = list.filter((s) => !s.native);
+          const GROUP = 3;
+          for (let g = 0; g < pending.length; g += GROUP) {
+            const group = pending.slice(g, g + GROUP);
+            const groupIdx = group.map((s) => list.indexOf(s));
+            try {
+              const res = await extractAudioNativeBatch({
+                inputName: track.inputName,
+                streams: group.map((s) => ({ streamIndex: s.index, codec: s.codec })),
+                onProgress: (p) => {
+                  groupIdx.forEach((i) => {
+                    perStreamProgress[i] = p * 0.6;
+                  });
+                  reportOverall();
+                },
+              });
+              Object.assign(batchNative, res);
+            } catch (batchErr) {
+              console.warn("[extractAll:audio] batch native failed, falling back per track:", batchErr);
+            }
+          }
+        }
+
         // Streams are extracted one at a time (own ffmpeg pass each), not
         // batched into a single multi-map command, so progress reflects the
         // stream actually being worked on and one bad stream can't abort the
@@ -657,7 +687,8 @@ export function useTrackQueue() {
           patchStream(trackId, kind, stream.index, { status: "extracting", progress: 0, error: null });
           try {
             if (kind === "audio") {
-              let native = stream.native;
+              let native = stream.native || batchNative[stream.index];
+              delete batchNative[stream.index];
               if (!native) {
                 native = await extractAudioNative({
                   inputName: track.inputName,
