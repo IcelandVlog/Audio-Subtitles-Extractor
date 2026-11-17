@@ -47,6 +47,7 @@ const CATEGORIES = [
       { id: "make-pinyin-subtitles", label: "Make Pinyin Subtitles" },
       { id: "compress-audio", label: "Audio Compressor", badge: "New!" },
       { id: "video-info", label: "Video Info", badge: "New!" },
+      { id: "detect-languages", label: "Detect Languages", badge: "New!" },
     ],
   },
 ];

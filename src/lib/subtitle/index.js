@@ -14,7 +14,8 @@ import { parseVobsub } from "./vobsub";
 import { ocrFramesToCues } from "./ocr";
 import { cuesToPinyin } from "./pinyin";
 import { detectSubtitleLanguage } from "./langDetect";
-import { compressAudio, readMediaLog } from "../ffmpegEngine";
+import { compressAudio, readMediaLog, probeFile, cleanupInput } from "../ffmpegEngine";
+import { detectTrackLanguage } from "../detectLanguage";
 import { parseMediaInfo, reportToText } from "../mediaInfo";
 import { readMkvLanguages } from "../mkvLanguages";
 import JSZip from "jszip";
@@ -555,6 +556,63 @@ export const TOOLS = {
       const audioTrack = options.audioTrack === "all" ? "all" : Number(options.audioTrack) || 0;
       const { blob, extension } = await compressAudio({ file, format, quality, audioTrack, onProgress });
       return download(`${baseName(file.name)}.compressed.${extension}`, blob, blob.type);
+    },
+  },
+  "detect-languages": {
+    label: "Detect Languages",
+    category: "other",
+    accept: ".mp4,.mkv,.mov,.avi,.webm,.m4v,.wmv,.flv,.ts,.mpg,.mpeg,.3gp,.mka,.mp3,.m4a,.aac,.wav,.flac,.ogg,.opus,.wma",
+    fields: [],
+    showPercent: true,
+    progressLabel: "Detecting",
+    actionLabel: "Detect",
+    multiFile: true,
+    minFiles: 1,
+    maxFiles: 100000,
+    hint: "Finds the spoken language of every audio track. It skips the first few minutes, samples the main part of each file and keeps the voice band, so background music counts for less. Results are saved as a .txt file.",
+    async run(files, options, onProgress) {
+      const sections = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const header = `File ${i + 1}: ${file.name}`;
+        const probe = await probeFile(file);
+        try {
+          const audio = probe.streams.filter((s) => s.type === "Audio");
+          const lines = [header, "=".repeat(header.length), `Audio tracks: (${audio.length})`, "-".repeat(60)];
+          if (audio.length === 0) lines.push("No audio tracks found.");
+
+          for (let j = 0; j < audio.length; j++) {
+            const s = audio[j];
+            const tag = s.language ? `${languageName(s.language)} (${s.language})` : "None";
+            const detected = await detectTrackLanguage({
+              inputName: probe.inputName,
+              streamIndex: s.index,
+              duration: probe.duration,
+              onProgress: (p) => {
+                const part = (j + p) / audio.length;
+                onProgress?.((i + part) / files.length, { index: i, fraction: part });
+              },
+            });
+            const number = String(j + 1).padStart(2, "0");
+            lines.push(number);
+            lines.push(`Language tag: ${tag}`);
+            if (detected) {
+              const pct = detected.confidence <= 1 ? detected.confidence * 100 : detected.confidence;
+              lines.push(`Detected: ${languageName(detected.code)} (${detected.code})`);
+              lines.push(`Confidence: ${Math.round(pct)}%`);
+            } else {
+              lines.push("Detected: could not be determined");
+            }
+            lines.push("");
+          }
+          sections.push(lines.join("\n"));
+        } finally {
+          await cleanupInput(probe.inputName);
+        }
+        if (onProgress) onProgress((i + 1) / files.length, { index: i, fraction: 1 });
+      }
+      const name = files.length === 1 ? `${baseName(files[0].name)}.languages.txt` : "languages.txt";
+      return download(name, sections.join("\n\n"), "text/plain");
     },
   },
   "video-info": {

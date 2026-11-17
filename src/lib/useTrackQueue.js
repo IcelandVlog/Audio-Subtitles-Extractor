@@ -9,13 +9,13 @@ import {
   loadEngine,
   extractAudioNative,
   extractAudioNativeBatch,
-  extractAudioSample,
   convertAudioFromNative,
   formatMatchesCodec,
   defaultFormatForCodec,
 } from "./ffmpegEngine";
 import { downloadBlob, downloadResultFiles, addResultToZip, stripExt } from "./download";
 import { languageLabel } from "./languages";
+import { detectTrackLanguage } from "./detectLanguage";
 
 let idCounter = 0;
 const nextId = () => `track-${++idCounter}`;
@@ -462,42 +462,13 @@ export function useTrackQueue() {
       });
 
       try {
-        // Heavy (transformers.js + onnxruntime-web) — only pulled in the
-        // first time someone actually clicks "Detect language", same as the
-        // Video → Subtitles tool does for the transcriber itself.
-        const { detectLanguageAcrossClips } = await import("./subtitle/transcribe");
-
-        // Always pull a handful of short clips from points spread across the
-        // *real* duration (not just one slice near the start) via cheap
-        // ffmpeg stream-copy — regardless of whether the full track has
-        // already been extracted (`stream.native.blob`). Previously, once a
-        // track was extracted, this reused that full blob and ran it through
-        // decodeAudioTo16kMono, which decodes + renders the *entire* track
-        // via the Web Audio API before sampling just a few seconds of it —
-        // on a multi-hour file that's a multi-hundred-MB (sometimes multi-GB)
-        // allocation for a detection pass that only ever looks at ~2 minutes
-        // of audio. Sampling short clips straight from the source via ffmpeg
-        // (near-instant, stream-copy, no re-encode) avoids that entirely, so
-        // a long stretch of score, action, or ambient sound at any one point
-        // — common in a series/movie file — also can't single-handedly
-        // decide the result.
-        const duration = track.duration || 0;
-        const startPoints =
-          duration > 40 ? [Math.min(20, duration * 0.15), duration * 0.45, duration * 0.75] : [0];
-
-        const sampleBlobs = [];
-        for (const startSeconds of startPoints) {
-          sampleBlobs.push(
-            await extractAudioSample({
-              inputName: track.inputName,
-              streamIndex,
-              codec: stream.codec,
-              seconds: 30,
-              startSeconds,
-            })
-          );
-        }
-        const detected = await detectLanguageAcrossClips(sampleBlobs);
+        // Speech-focused clips from the main part of the file (intro skipped,
+        // music de-emphasised), voted on by the language-ID model.
+        const detected = await detectTrackLanguage({
+          inputName: track.inputName,
+          streamIndex,
+          duration: track.duration || 0,
+        });
 
         if (!detected) {
           patchStream(trackId, "audio", streamIndex, { languageDetectStatus: "error" });

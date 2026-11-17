@@ -558,6 +558,48 @@ export function convertAudioFromNative({ nativeBlob, nativeExtension, streamInde
 }
 
 /**
+ * Short speech-focused clip for language detection. Keeps roughly the voice
+ * band (200 Hz to 3.4 kHz), which drops much of the bass and drum content of
+ * background music, and writes 16 kHz mono WAV for the language-ID model.
+ * Unlike extractAudioSample this re-encodes (to PCM), but a 25-second clip is
+ * tiny, so it stays quick.
+ */
+export function extractSpeechSample({ inputName: rawInput, streamIndex, startSeconds = 0, seconds = 25 }) {
+  return runExclusive(async () => {
+    const ffmpeg = await loadEngine();
+    const inputName = await fastInput(ffmpeg, rawInput);
+    const outputName = `speech_${streamIndex}_${Date.now()}.wav`;
+    try {
+      const args = [...FAST_OPEN_ARGS];
+      if (startSeconds > 0) args.push("-ss", String(startSeconds));
+      args.push(
+        "-i",
+        inputName,
+        "-map",
+        `0:${streamIndex}`,
+        "-t",
+        String(seconds),
+        "-vn",
+        "-af",
+        "highpass=f=200,lowpass=f=3400",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-c:a",
+        "pcm_s16le",
+        outputName
+      );
+      await execCapturingLog(ffmpeg, args);
+      const data = await ffmpeg.readFile(outputName);
+      return new Blob([data.buffer], { type: "audio/wav" });
+    } finally {
+      await ffmpeg.deleteFile(outputName).catch(() => {});
+    }
+  });
+}
+
+/**
  * Extract several audio streams' native (stream-copied) form in ONE ffmpeg
  * pass, instead of one `-i` invocation per stream. `-i` re-parses/re-reads
  * the whole container from the start every time it's called, so demuxing 8
