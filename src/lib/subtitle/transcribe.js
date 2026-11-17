@@ -45,16 +45,16 @@ async function getTranscriber(quality, language, onModelProgress) {
   };
 
   const loadPromise = (async () => {
+    const hasGpu = typeof navigator !== "undefined" && !!navigator.gpu;
     const attempts = [
-      // WebGPU is dramatically faster than CPU/WASM when the browser supports
-      // it (Chrome/Edge on most machines) — try it first, silently fall back.
-      ...(typeof navigator !== "undefined" && navigator.gpu ? [{ device: "webgpu" }] : []),
-      // Default WASM path — let the library choose the right dtype per
-      // sub-model (encoder/decoder) automatically.
-      {},
-      // Last resort: full precision, no quantization at all. Slower/bigger
-      // download, but sidesteps any quantized-weight/scale mismatch.
-      { dtype: "fp32" },
+      // WebGPU is faster when the browser really has a GPU adapter. Without
+      // one (the "Failed to get GPU adapter" case) it fails, so fall through.
+      ...(hasGpu ? [{ device: "webgpu" }] : []),
+      // CPU (WASM) path, pinned explicitly so onnxruntime doesn't keep
+      // trying WebGPU and report "no available backend found".
+      { device: "wasm" },
+      // Last resort: full precision, no quantization at all.
+      { device: "wasm", dtype: "fp32" },
     ];
 
     let lastErr;
