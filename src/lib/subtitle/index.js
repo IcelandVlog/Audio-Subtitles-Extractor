@@ -559,7 +559,7 @@ export const TOOLS = {
     },
   },
   "detect-languages": {
-    label: "Detect Languages",
+    label: "Audio Detect",
     category: "other",
     accept: ".mp4,.mkv,.mov,.avi,.webm,.m4v,.wmv,.flv,.ts,.mpg,.mpeg,.3gp,.mka,.mp3,.m4a,.aac,.wav,.flac,.ogg,.opus,.wma",
     fields: [],
@@ -569,21 +569,17 @@ export const TOOLS = {
     multiFile: true,
     minFiles: 1,
     maxFiles: 100000,
-    hint: "Finds the spoken language of every audio track. It skips the first few minutes, samples the main part of each file and keeps the voice band, so background music counts for less. Results are saved as a .txt file.",
+    hint: "Finds the spoken language of each audio track. It skips the first few minutes, samples the main part of each file and keeps the voice band, so background music counts for less. Results appear below.",
     async run(files, options, onProgress) {
-      const sections = [];
+      const languages = [];
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        const header = `File ${i + 1}: ${file.name}`;
         const probe = await probeFile(file);
         try {
           const audio = probe.streams.filter((s) => s.type === "Audio");
-          const lines = [header, "=".repeat(header.length), `Audio tracks: (${audio.length})`, "-".repeat(60)];
-          if (audio.length === 0) lines.push("No audio tracks found.");
-
+          const tracks = [];
           for (let j = 0; j < audio.length; j++) {
             const s = audio[j];
-            const tag = s.language ? `${languageName(s.language)} (${s.language})` : "None";
             const detected = await detectTrackLanguage({
               inputName: probe.inputName,
               streamIndex: s.index,
@@ -593,26 +589,22 @@ export const TOOLS = {
                 onProgress?.((i + part) / files.length, { index: i, fraction: part });
               },
             });
-            const number = String(j + 1).padStart(2, "0");
-            lines.push(number);
-            lines.push(`Language tag: ${tag}`);
-            if (detected) {
-              const pct = detected.confidence <= 1 ? detected.confidence * 100 : detected.confidence;
-              lines.push(`Detected: ${languageName(detected.code)} (${detected.code})`);
-              lines.push(`Confidence: ${Math.round(pct)}%`);
-            } else {
-              lines.push("Detected: could not be determined");
-            }
-            lines.push("");
+            const pct = detected ? (detected.confidence <= 1 ? detected.confidence * 100 : detected.confidence) : null;
+            tracks.push({
+              number: j + 1,
+              tag: s.language ? `${languageName(s.language)} (${s.language})` : "None",
+              detected: detected ? `${languageName(detected.code)} (${detected.code})` : "Could not be determined",
+              confidence: pct === null ? null : Math.round(pct),
+            });
           }
-          sections.push(lines.join("\n"));
+          languages.push({ index: i + 1, name: file.name, tracks });
         } finally {
           await cleanupInput(probe.inputName);
         }
         if (onProgress) onProgress((i + 1) / files.length, { index: i, fraction: 1 });
       }
-      const name = files.length === 1 ? `${baseName(files[0].name)}.languages.txt` : "languages.txt";
-      return download(name, sections.join("\n\n"), "text/plain");
+      // No file is produced: the results are shown on the page.
+      return { languages };
     },
   },
   "video-info": {

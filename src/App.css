@@ -2153,3 +2153,14 @@
 
 /* Video Info cards: same panel background as the track rows. */
 .mediainfo .mediainfo__card { background: var(--surface); }
+
+/* Audio Detect results */
+.lang-results { display: flex; flex-direction: column; gap: 10px; margin: 12px 0; }
+.lang-results__file { border: 1px solid var(--border-soft); border-radius: 6px; padding: 10px 12px; }
+.lang-results__name { font-family: var(--font-mono); font-size: 13px; margin: 0 0 6px; }
+.lang-results__track { display: grid; grid-template-columns: 36px minmax(0, 1fr) minmax(0, 1.4fr); gap: 8px; font-size: 13px; color: var(--text-muted); padding: 3px 0; }
+.lang-results__num { font-family: var(--font-mono); color: var(--phosphor); }
+@media (max-width: 640px) {
+  .lang-results__track { grid-template-columns: 30px 1fr; }
+  .lang-results__track > span:last-child { grid-column: 2; }
+}

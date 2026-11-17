@@ -290,12 +290,36 @@ export default function ToolPage({ toolId, onHome }) {
           <>
             {result.note && <p className="tool-page__hint">{result.note}</p>}
             {result.report && <MediaInfoReport reports={result.report} />}
-            <div className="tool-modal__result">
-              <span>Done — {result.filename}</span>
-              <button type="button" className="tool-modal__download" onClick={handleDownload}>
-                Download
-              </button>
-            </div>
+            {result.languages && (
+              <div className="lang-results">
+                {result.languages.map((f) => (
+                  <div className="lang-results__file" key={f.index}>
+                    <p className="lang-results__name">
+                      {f.index}. {f.name}
+                    </p>
+                    {f.tracks.length === 0 && <p className="tool-page__hint">No audio tracks found.</p>}
+                    {f.tracks.map((t) => (
+                      <div className="lang-results__track" key={t.number}>
+                        <span className="lang-results__num">{String(t.number).padStart(2, "0")}</span>
+                        <span>Tag: {t.tag}</span>
+                        <span>
+                          Detected: {t.detected}
+                          {t.confidence !== null && ` (${t.confidence}%)`}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+            {result.blob && (
+              <div className="tool-modal__result">
+                <span>Done — {result.filename}</span>
+                <button type="button" className="tool-modal__download" onClick={handleDownload}>
+                  Download
+                </button>
+              </div>
+            )}
             {result.inspect && (
               <ul className="tool-modal__inspectlist">
                 {result.inspect.map((entry, i) => (
