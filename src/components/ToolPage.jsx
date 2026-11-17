@@ -171,7 +171,7 @@ export default function ToolPage({ toolId, onHome }) {
           ) : isMulti ? (
             <div className="tool-modal__filelist tool-modal__filelist--multi" onClick={(e) => e.stopPropagation()}>
               <p className="tool-modal__filecount">
-                {files.length} of {minFiles}–{maxFiles} files added
+                {files.length} of {minFiles}–{maxFiles >= 100000 ? "∞" : maxFiles} files added
               </p>
               <ul>
                 {files.map((f, i) => {

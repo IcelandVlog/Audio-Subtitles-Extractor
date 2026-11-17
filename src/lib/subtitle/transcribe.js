@@ -1,4 +1,4 @@
-import { pipeline, env, Tensor } from "@huggingface/transformers";
+import { pipeline, env, Tensor, AutoModelForSpeechSeq2Seq, AutoProcessor } from "@huggingface/transformers";
 
 // We only ever run in the browser (WASM/WebGPU) — never try to read local model
 // files from disk, always fetch from the HF Hub CDN (cached by the browser after
@@ -45,22 +45,31 @@ async function getTranscriber(quality, language, onModelProgress) {
   };
 
   const loadPromise = (async () => {
+    const hasGpu = typeof navigator !== "undefined" && !!navigator.gpu;
     const attempts = [
-      // WebGPU is dramatically faster than CPU/WASM when the browser supports
-      // it (Chrome/Edge on most machines) — try it first, silently fall back.
-      ...(typeof navigator !== "undefined" && navigator.gpu ? [{ device: "webgpu" }] : []),
-      // Default WASM path — let the library choose the right dtype per
-      // sub-model (encoder/decoder) automatically.
-      {},
-      // Last resort: full precision, no quantization at all. Slower/bigger
-      // download, but sidesteps any quantized-weight/scale mismatch.
-      { dtype: "fp32" },
+      // WebGPU is faster when the browser really has a GPU adapter. Without
+      // one (the "Failed to get GPU adapter" case) it fails, so fall through.
+      ...(hasGpu ? [{ device: "webgpu" }] : []),
+      // CPU (WASM) path, pinned explicitly so onnxruntime doesn't keep
+      // trying WebGPU and report "no available backend found".
+      { device: "wasm" },
+      // Last resort: full precision, no quantization at all.
+      { device: "wasm", dtype: "fp32" },
     ];
 
     let lastErr;
     for (const opts of attempts) {
       try {
         onModelProgress?.(0);
+        if (quality === "lid") {
+          // Language ID only needs the model and processor (see detectLanguage),
+          // so load those directly. This keeps the device choice explicit instead
+          // of going through the pipeline, which kept requesting WebGPU.
+          const progress_callback = makeProgressHandler();
+          const processor = await AutoProcessor.from_pretrained(modelId, { progress_callback });
+          const model = await AutoModelForSpeechSeq2Seq.from_pretrained(modelId, { ...opts, progress_callback });
+          return { model, processor };
+        }
         return await pipeline("automatic-speech-recognition", modelId, {
           ...opts,
           progress_callback: makeProgressHandler(),
