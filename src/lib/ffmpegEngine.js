@@ -158,6 +158,10 @@ function parseProbeLog(log) {
 // in-memory copy. So: use it only when the file is actually too big to fit
 // in memory — everything else takes the fast MEMFS path it used to.
 const MEMFS_SAFE_BYTES = 1.5 * 1024 * 1024 * 1024; // stay under the ~2GB wasm heap cap with headroom
+// Files above this are never copied into memory. A copy needs the bytes in JS
+// and in ffmpeg at once (about twice the file size), which froze the browser
+// on large files. Bigger files read through the mount instead.
+const STAGE_MAX_BYTES = 600 * 1024 * 1024;
 let mountCounter = 0;
 
 function safeName(name) {
@@ -193,7 +197,7 @@ async function fastInput(ffmpeg, inputName, onProgress) {
   if (!inputName.includes("/")) return inputName; // already in memory
   if (stagedInput?.source === inputName) return stagedInput.path;
   const file = mountedFiles.get(inputName);
-  if (!file || file.size > MEMFS_SAFE_BYTES) return inputName;
+  if (!file || file.size > STAGE_MAX_BYTES) return inputName;
 
   if (stagedInput) {
     await ffmpeg.deleteFile(stagedInput.path).catch(() => {});
@@ -984,6 +988,26 @@ export function extractSubtitle({ inputName: rawInput, streamIndex, codec, langu
     } finally {
       ffmpeg.off("progress", progressHandler);
     }
+  });
+}
+
+/**
+ * Drop the in-memory copy of the current source file. It is re-created on the
+ * next extraction, so this only costs a short copy. Runs when the tab is hidden,
+ * so a big idle copy doesn't keep memory tied up while the page is in the background.
+ */
+export function releaseStagedInput() {
+  return runExclusive(async () => {
+    if (!stagedInput || !ffmpegInstance) return;
+    const path = stagedInput.path;
+    stagedInput = null;
+    await ffmpegInstance.deleteFile(path).catch(() => {});
+  });
+}
+
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) releaseStagedInput();
   });
 }
 
