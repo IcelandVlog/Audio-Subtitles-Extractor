@@ -46,7 +46,6 @@ export const TOOL_CATEGORIES = [
       { id: "pinyin", label: "Make Pinyin Subtitles", route: "pinyin" },
       { id: "compress-audio", label: "Audio Compressor", route: "compress-audio", badge: "New!" },
       { id: "video-info", label: "Video Info", route: "video-info", badge: "New!" },
-      { id: "detect-languages", label: "Audio Detect", route: "detect-languages", badge: "New!" },
     ],
   },
 ];
