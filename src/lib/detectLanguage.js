@@ -5,7 +5,7 @@ const SKIP_INTRO_SECONDS = 300;
 // Keep clear of the ending credits (usually music) at the very end.
 const OUTRO_MARGIN_SECONDS = 60;
 const CLIP_SECONDS = 25;
-const CLIP_COUNT = 4;
+const CLIP_COUNT = 6;
 
 /**
  * Start points spread across the main part of the file, after the intro.
